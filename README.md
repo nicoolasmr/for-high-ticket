@@ -1,31 +1,44 @@
 # Revenue OS for High Ticket
 
-Implementação inicial de uma **demo interativa** do Revenue OS para validar proposta de valor, UX operacional e narrativa comercial do produto.
+Fundação inicial do **Revenue OS** com frontend estático e **backend local em Python + SQLite**, permitindo validar uma experiência mais próxima de produto real sem depender de bibliotecas externas.
 
 ## Estrutura atual
 
 - `index.html`: página pública do produto com posicionamento, módulos, ICP, roadmap e pricing.
-- `app.html`: demo interativa do app com navegação entre dashboard, leads, pipeline, tasks e analytics.
-- `app.js`: lógica client-side para renderizar dataset mockado, filtros e troca de views.
-- `data.js`: dados de demonstração do pipeline comercial.
-- `styles.css`: sistema visual compartilhado entre site e app.
+- `app.html`: shell do app que consome dados reais da API local.
+- `app.js`: cliente browser que renderiza dashboard, leads, pipeline, tasks e analytics a partir da API.
+- `server.py`: servidor HTTP com rotas da API e persistência em SQLite.
+- `revenue_os.db`: banco local criado automaticamente ao subir a aplicação.
+- `tests/test_server.py`: testes unitários do backend.
 
-## Rodando localmente
+## Como rodar
 
 ```bash
-python -m http.server 3000
+python server.py
 ```
 
-Depois abra:
+Depois acesse:
 
-- `http://localhost:3000/`
-- `http://localhost:3000/app.html`
+- `http://127.0.0.1:3000/`
+- `http://127.0.0.1:3000/app.html`
+- `http://127.0.0.1:3000/api/health`
+
+## Rotas disponíveis
+
+- `GET /api/health`
+- `GET /api/dashboard`
+- `GET /api/leads`
+- `GET /api/leads/:leadId/summary`
+- `GET /api/pipeline`
+- `GET /api/tasks`
+- `GET /api/analytics`
 
 ## Próximo passo recomendado
 
-Migrar esta demo para uma base real em Next.js + TypeScript + Supabase, preservando:
+Migrar essa fundação para uma stack de produção com:
 
-1. narrativa de marketing já pronta;
-2. arquitetura de navegação do app;
-3. modelo de dados inicial para leads, pipeline e tasks;
-4. espaço reservado para IA, billing e analytics reais.
+1. Next.js App Router no frontend;
+2. Supabase Auth + Postgres + RLS;
+3. server actions/route handlers;
+4. billing com Stripe;
+5. camada de IA desacoplada para summaries e next best action.

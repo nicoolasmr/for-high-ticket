@@ -1,12 +1,16 @@
-import { insights, leads, onboardingSteps, stages, tasks } from './data.js'
+const currency = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+  maximumFractionDigits: 0,
+})
 
-const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 const state = {
   activeView: 'dashboard',
   search: '',
   owner: 'all',
   temperature: 'all',
-  selectedLeadId: leads[0]?.id ?? null,
+  selectedLeadId: null,
+  leads: [],
 }
 
 const titleByView = {
@@ -22,7 +26,6 @@ const navItems = [...document.querySelectorAll('.nav-item')]
 const searchInput = document.querySelector('#lead-search')
 const ownerFilter = document.querySelector('#owner-filter')
 const temperatureFilter = document.querySelector('#temperature-filter')
-
 const kpiGrid = document.querySelector('#kpi-grid')
 const priorityList = document.querySelector('#priority-list')
 const priorityPill = document.querySelector('#priority-pill')
@@ -34,50 +37,51 @@ const onboardingList = document.querySelector('#onboarding-list')
 const insightsList = document.querySelector('#insights-list')
 const sourcePerformance = document.querySelector('#source-performance')
 
-function getFilteredLeads() {
-  return leads.filter((lead) => {
-    const matchesSearch = [lead.name, lead.company, lead.source].join(' ').toLowerCase().includes(state.search.toLowerCase())
-    const matchesOwner = state.owner === 'all' || lead.owner === state.owner
-    const matchesTemperature = state.temperature === 'all' || lead.temperature === state.temperature
-    return matchesSearch && matchesOwner && matchesTemperature
+async function fetchJson(url) {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`Request failed: ${response.status}`)
+  return response.json()
+}
+
+function setView(view) {
+  state.activeView = view
+  viewTitle.textContent = titleByView[view]
+  navItems.forEach((item) => item.classList.toggle('active', item.dataset.view === view))
+  document.querySelectorAll('.view-stack').forEach((section) => {
+    section.classList.toggle('hidden', section.id !== `${view}-view`)
   })
 }
 
-function getKpis() {
-  const totalValue = leads.reduce((sum, lead) => sum + lead.value, 0)
-  const hotLeads = leads.filter((lead) => lead.temperature === 'hot').length
-  const riskyLeads = leads.filter((lead) => lead.lastReplyHours >= 18).length
-  const overdueTasks = tasks.filter((task) => ['urgent', 'high'].includes(task.priority)).length
+function renderFilters() {
+  const owners = ['all', ...new Set(state.leads.map((lead) => lead.owner))]
+  ownerFilter.innerHTML = owners
+    .map((owner) => `<option value="${owner}">${owner === 'all' ? 'Todos os owners' : owner}</option>`)
+    .join('')
+  ownerFilter.value = state.owner
 
-  return [
-    { label: 'Leads no pipeline', value: String(leads.length), detail: `${hotLeads} quentes` },
-    { label: 'Receita prevista', value: currency.format(totalValue), detail: 'Somatório do pipeline' },
-    { label: 'Leads em risco', value: String(riskyLeads), detail: 'Silêncio crítico ou atraso' },
-    { label: 'Tasks prioritárias', value: String(overdueTasks), detail: 'Hoje' },
-  ]
+  const temperatures = ['all', 'hot', 'warm', 'cold']
+  temperatureFilter.innerHTML = temperatures
+    .map((value) => `<option value="${value}">${value === 'all' ? 'Todas as temperaturas' : value}</option>`)
+    .join('')
+  temperatureFilter.value = state.temperature
 }
 
-function renderKpis() {
-  kpiGrid.innerHTML = getKpis()
+async function loadDashboard() {
+  const dashboard = await fetchJson('/api/dashboard')
+  kpiGrid.innerHTML = dashboard.kpis
     .map(
       (kpi) => `
         <article class="metric-card glass-card compact-card">
           <span>${kpi.label}</span>
-          <strong>${kpi.value}</strong>
+          <strong>${typeof kpi.value === 'number' && kpi.label.includes('Receita') ? currency.format(kpi.value) : kpi.value}</strong>
           <small>${kpi.detail}</small>
         </article>
       `,
     )
     .join('')
-}
 
-function renderPriorityList() {
-  const risky = [...leads]
-    .sort((a, b) => b.lastReplyHours - a.lastReplyHours)
-    .slice(0, 3)
-
-  priorityPill.textContent = `${risky.length} leads críticos`
-  priorityList.innerHTML = risky
+  priorityPill.textContent = `${dashboard.priorities.length} leads críticos`
+  priorityList.innerHTML = dashboard.priorities
     .map(
       (lead) => `
         <button class="stack-item action-card" data-select-lead="${lead.id}">
@@ -92,45 +96,17 @@ function renderPriorityList() {
     .join('')
 }
 
-function renderSummary() {
-  const lead = leads.find((item) => item.id === state.selectedLeadId) ?? leads[0]
-  if (!lead) return
-
-  aiSummary.innerHTML = `
-    <div class="summary-block">
-      <span class="eyebrow">${lead.name} · ${lead.company}</span>
-      <p>${lead.summary.text}</p>
-      <div class="summary-columns">
-        <div>
-          <strong>Objeções</strong>
-          <ul>${lead.summary.objections.map((item) => `<li>${item}</li>`).join('')}</ul>
-        </div>
-        <div>
-          <strong>Sinais de compra</strong>
-          <ul>${lead.summary.signals.map((item) => `<li>${item}</li>`).join('')}</ul>
-        </div>
-      </div>
-      <p><strong>Próxima melhor ação:</strong> ${lead.summary.nextBestAction}</p>
-      <blockquote>${lead.summary.suggestedReply}</blockquote>
-    </div>
-  `
-}
-
-function renderFilters() {
-  const owners = ['all', ...new Set(leads.map((lead) => lead.owner))]
-  ownerFilter.innerHTML = owners.map((owner) => `<option value="${owner}">${owner === 'all' ? 'Todos os owners' : owner}</option>`).join('')
-  ownerFilter.value = state.owner
-
-  const temperatures = ['all', 'hot', 'warm', 'cold']
-  temperatureFilter.innerHTML = temperatures
-    .map((value) => `<option value="${value}">${value === 'all' ? 'Todas as temperaturas' : value}</option>`)
-    .join('')
-  temperatureFilter.value = state.temperature
-}
-
-function renderLeadsTable() {
-  const filtered = getFilteredLeads()
-  leadsTableBody.innerHTML = filtered
+async function loadLeads() {
+  const params = new URLSearchParams({
+    search: state.search,
+    owner: state.owner,
+    temperature: state.temperature,
+  })
+  const payload = await fetchJson(`/api/leads?${params.toString()}`)
+  state.leads = payload.items
+  if (!state.selectedLeadId && state.leads[0]) state.selectedLeadId = state.leads[0].id
+  renderFilters()
+  leadsTableBody.innerHTML = state.leads
     .map(
       (lead) => `
         <tr data-select-lead="${lead.id}">
@@ -138,7 +114,7 @@ function renderLeadsTable() {
             <strong>${lead.name}</strong>
             <div class="table-sub">${lead.company} · ${lead.source}</div>
           </td>
-          <td>${stageName(lead.stage)}</td>
+          <td>${lead.stageName}</td>
           <td>${lead.owner}</td>
           <td><span class="temp temp-${lead.temperature}">${lead.temperature}</span></td>
           <td>${lead.nextAction}</td>
@@ -150,27 +126,48 @@ function renderLeadsTable() {
     .join('')
 }
 
-function stageName(stageId) {
-  return stages.find((stage) => stage.id === stageId)?.name ?? stageId
+async function loadSummary(leadId) {
+  if (!leadId) return
+  const lead = await fetchJson(`/api/leads/${leadId}/summary`)
+  aiSummary.innerHTML = `
+    <div class="summary-block">
+      <span class="eyebrow">${lead.name} · ${lead.company}</span>
+      <p>${lead.text}</p>
+      <div class="summary-columns">
+        <div>
+          <strong>Objeções</strong>
+          <ul>${lead.objections.map((item) => `<li>${item}</li>`).join('')}</ul>
+        </div>
+        <div>
+          <strong>Sinais de compra</strong>
+          <ul>${lead.signals.map((item) => `<li>${item}</li>`).join('')}</ul>
+        </div>
+      </div>
+      <p><strong>Próxima melhor ação:</strong> ${lead.nextBestAction}</p>
+      <blockquote>${lead.suggestedReply}</blockquote>
+    </div>
+  `
 }
 
-function renderPipeline() {
-  pipelineBoard.innerHTML = stages
-    .map((stage) => {
-      const stageLeads = leads.filter((lead) => lead.stage === stage.id)
-      return `
-        <section class="pipeline-column">
+async function loadPipeline() {
+  const payload = await fetchJson('/api/pipeline')
+  pipelineBoard.innerHTML = payload.stages
+    .map(
+      (stage) => `
+        <section class="pipeline-column glass-card compact-card">
           <header>
             <h3>${stage.name}</h3>
-            <span>${stageLeads.length}</span>
+            <span>${stage.leads.length}</span>
           </header>
           <div class="pipeline-column-body">
-            ${stageLeads
+            ${stage.leads
               .map(
                 (lead) => `
                   <button class="pipeline-card" data-select-lead="${lead.id}">
-                    <strong>${lead.name}</strong>
-                    <p>${lead.company}</p>
+                    <div>
+                      <strong>${lead.name}</strong>
+                      <p>${lead.company}</p>
+                    </div>
                     <small>${currency.format(lead.value)} · ${lead.owner}</small>
                   </button>
                 `,
@@ -178,18 +175,19 @@ function renderPipeline() {
               .join('')}
           </div>
         </section>
-      `
-    })
+      `,
+    )
     .join('')
 }
 
-function renderTasks() {
-  taskList.innerHTML = tasks
+async function loadTasks() {
+  const payload = await fetchJson('/api/tasks')
+  taskList.innerHTML = payload.tasks
     .map(
       (task) => `
         <div class="stack-item">
           <div>
-            <strong>${task.time}</strong>
+            <strong>${task.due_time}</strong>
             <p>${task.title}</p>
           </div>
           <span class="pill ${task.priority === 'urgent' ? 'pill-danger' : 'pill-neutral'}">${task.priority}</span>
@@ -198,7 +196,7 @@ function renderTasks() {
     )
     .join('')
 
-  onboardingList.innerHTML = onboardingSteps
+  onboardingList.innerHTML = payload.onboarding
     .map(
       (step) => `
         <div class="stack-item">
@@ -213,8 +211,9 @@ function renderTasks() {
     .join('')
 }
 
-function renderAnalytics() {
-  insightsList.innerHTML = insights
+async function loadAnalytics() {
+  const payload = await fetchJson('/api/analytics')
+  insightsList.innerHTML = payload.insights
     .map(
       (insight) => `
         <div class="stack-item">
@@ -227,16 +226,7 @@ function renderAnalytics() {
     )
     .join('')
 
-  const bySource = Object.values(
-    leads.reduce((acc, lead) => {
-      acc[lead.source] ??= { source: lead.source, count: 0, revenue: 0 }
-      acc[lead.source].count += 1
-      acc[lead.source].revenue += lead.value
-      return acc
-    }, {}),
-  )
-
-  sourcePerformance.innerHTML = bySource
+  sourcePerformance.innerHTML = payload.sources
     .map(
       (item) => `
         <div class="stack-item">
@@ -251,48 +241,37 @@ function renderAnalytics() {
     .join('')
 }
 
-function setView(view) {
-  state.activeView = view
-  viewTitle.textContent = titleByView[view]
-  navItems.forEach((item) => item.classList.toggle('active', item.dataset.view === view))
-  document.querySelectorAll('.view-stack').forEach((section) => {
-    section.classList.toggle('hidden', section.id !== `${view}-view`)
-  })
-}
-
 function attachEvents() {
   navItems.forEach((item) => item.addEventListener('click', () => setView(item.dataset.view)))
-  searchInput.addEventListener('input', (event) => {
+  searchInput.addEventListener('input', async (event) => {
     state.search = event.target.value
-    renderLeadsTable()
+    await loadLeads()
   })
-  ownerFilter.addEventListener('change', (event) => {
+  ownerFilter.addEventListener('change', async (event) => {
     state.owner = event.target.value
-    renderLeadsTable()
+    await loadLeads()
   })
-  temperatureFilter.addEventListener('change', (event) => {
+  temperatureFilter.addEventListener('change', async (event) => {
     state.temperature = event.target.value
-    renderLeadsTable()
+    await loadLeads()
   })
-  document.body.addEventListener('click', (event) => {
+  document.body.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-select-lead]')
     if (!button) return
     state.selectedLeadId = button.dataset.selectLead
-    renderSummary()
+    await loadSummary(state.selectedLeadId)
     setView('dashboard')
   })
 }
 
-function init() {
-  renderKpis()
-  renderPriorityList()
-  renderSummary()
-  renderFilters()
-  renderLeadsTable()
-  renderPipeline()
-  renderTasks()
-  renderAnalytics()
-  attachEvents()
+async function init() {
+  try {
+    await Promise.all([loadDashboard(), loadLeads(), loadPipeline(), loadTasks(), loadAnalytics()])
+    if (state.selectedLeadId) await loadSummary(state.selectedLeadId)
+    attachEvents()
+  } catch (error) {
+    aiSummary.innerHTML = `<div class="stack-item"><p>Falha ao carregar a demo: ${error.message}</p></div>`
+  }
 }
 
 init()

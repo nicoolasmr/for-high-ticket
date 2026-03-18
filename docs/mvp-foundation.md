@@ -1,39 +1,35 @@
 # Revenue OS MVP Foundation
 
-## O que foi melhorado nesta iteração
+## Evolução desta iteração
 
-Esta versão substitui o protótipo puramente estático por uma demo mais útil para validação:
+O projeto saiu de uma demo puramente client-side e passou a ter uma fundação full-stack leve:
 
-- navegação entre áreas do app sem trocar de página;
-- lead inbox filtrável por busca, owner e temperatura;
-- resumo IA trocado dinamicamente conforme o lead selecionado;
-- pipeline renderizado a partir de dados estruturados;
-- analytics e tasks montados via dataset compartilhado.
+- API HTTP local para dashboard, leads, summary, pipeline, tasks e analytics;
+- persistência SQLite com schema inicial e seed automática;
+- frontend desacoplado do mock local e consumindo endpoints reais;
+- testes unitários cobrindo seed, filtros, summary e dashboard.
 
-## Por que isso importa
+## O que isso valida melhor agora
 
-A demo agora ajuda a validar três coisas antes da build full-stack:
-
-1. **Narrativa comercial** — o site já explica posicionamento, ICP e pricing beta.
-2. **Modelo operacional** — o app mostra como leads, tasks, pipeline e insights se conectam.
-3. **Estrutura de domínio** — o dataset já antecipa entidades centrais do produto.
+1. **Contrato de dados** entre frontend e backend.
+2. **Estrutura de domínios centrais**: leads, stages, tasks e onboarding.
+3. **Migração futura** para Next.js + Supabase com menos retrabalho no modelo.
 
 ## Próxima fase sugerida
 
-### Foundation técnica
-- Next.js App Router
-- TypeScript strict
-- Tailwind/shadcn
-- schema de environment
+### Produto
+- CRUD real de leads
+- mover lead de etapa
+- concluir task
+- autenticação de workspace
 
-### Core SaaS
-- Supabase Auth
-- workspaces e memberships
-- leads, stages, tasks e events
-- RLS por account_id
+### Plataforma
+- troca de SQLite por Supabase/Postgres
+- policies multi-tenant
+- eventos auditáveis
+- billing e access model
 
-### Monetização e IA
-- Stripe Checkout + portal
-- webhooks de assinatura
-- AI summary service
-- tracking de eventos do funil
+### Inteligência
+- AI summary persistido
+- next best action por contexto
+- insights de pipeline gerados dinamicamente
