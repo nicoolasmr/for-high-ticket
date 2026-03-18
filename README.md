@@ -18,3 +18,5 @@ Fundação inicial do **Revenue OS** com frontend estático e **backend local em
 - `GET /api/leads?status=...`
 - `POST /api/leads/:leadId/mark-won`
 - `POST /api/leads/:leadId/mark-lost`
+
+- `GET /api/analytics` agora retorna também recortes por `owner` e `status`.

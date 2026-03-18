@@ -473,13 +473,20 @@ def invite_team_member(conn: sqlite3.Connection, payload: dict) -> dict:
 
 def fetch_analytics(conn: sqlite3.Connection) -> dict:
     sources = conn.execute('select source, count(*) as count, sum(value) as revenue from leads group by source order by revenue desc').fetchall()
+    owners = conn.execute('select owner, count(*) as count, sum(value) as revenue from leads group by owner order by revenue desc').fetchall()
+    statuses = conn.execute('select status, count(*) as count, sum(value) as revenue from leads group by status order by count desc').fetchall()
     insights = [
         'Sua maior queda está entre Qualificado e Negociação.',
         'Carla tem a maior taxa de ganho, mas também o maior volume em risco.',
         'Indicação converte melhor que Instagram nesta semana.',
         '11 leads estão sem resposta há mais de 24 horas.',
     ]
-    return {'insights': insights, 'sources': [dict(row) for row in sources]}
+    return {
+        'insights': insights,
+        'sources': [dict(row) for row in sources],
+        'owners': [dict(row) for row in owners],
+        'statuses': [dict(row) for row in statuses],
+    }
 
 
 class RevenueOSHandler(SimpleHTTPRequestHandler):

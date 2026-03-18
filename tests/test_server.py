@@ -37,6 +37,12 @@ class RevenueOSTestCase(unittest.TestCase):
         self.assertEqual(len(dashboard['kpis']), 4)
         self.assertEqual(len(dashboard['priorities']), 3)
 
+    def test_analytics_payload(self):
+        analytics = server.fetch_analytics(self.conn)
+        self.assertIn('owners', analytics)
+        self.assertIn('statuses', analytics)
+        self.assertTrue(any(item['owner'] == 'Carla' for item in analytics['owners']))
+
     def test_create_lead(self):
         lead = server.create_lead(self.conn, {'name': 'Novo Lead', 'company': 'Empresa X', 'owner': 'Bia', 'source': 'Manual', 'temperature': 'hot', 'value': 9900})
         self.assertEqual(lead['name'], 'Novo Lead')

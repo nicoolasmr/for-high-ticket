@@ -26,3 +26,5 @@ O MVP agora cobre mais partes do modelo operacional previsto no blueprint:
 - filtros avançados e views saved;
 - analytics por owner e status;
 - cobrança e access model.
+
+- analytics por owner e status para visão mais gerencial do funil.

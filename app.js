@@ -34,6 +34,8 @@ const taskList = document.querySelector('#task-list')
 const onboardingList = document.querySelector('#onboarding-list')
 const insightsList = document.querySelector('#insights-list')
 const sourcePerformance = document.querySelector('#source-performance')
+const ownerPerformance = document.querySelector('#owner-performance')
+const statusPerformance = document.querySelector('#status-performance')
 
 async function request(url, options = {}) {
   const response = await fetch(url, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options })
@@ -121,7 +123,9 @@ async function loadTasks() {
 async function loadAnalytics() {
   const payload = await request('/api/analytics')
   insightsList.innerHTML = payload.insights.map((insight) => `<div class="stack-item"><div><strong>Insight</strong><p>${insight}</p></div></div>`).join('')
-  sourcePerformance.innerHTML = payload.sources.map((item) => `<div class="stack-item"><div><strong>${item.source}</strong><p>${item.count} leads</p></div><span class="pill pill-success">${currency.format(item.revenue)}</span></div>`).join('')
+  sourcePerformance.innerHTML = payload.sources.map((item) => `<div class="stack-item"><div><strong>${item.source}</strong><p>${item.count} leads</p></div><span class="pill pill-success">${currency.format(item.revenue || 0)}</span></div>`).join('')
+  ownerPerformance.innerHTML = payload.owners.map((item) => `<div class="stack-item"><div><strong>${item.owner}</strong><p>${item.count} leads</p></div><span class="pill pill-success">${currency.format(item.revenue || 0)}</span></div>`).join('')
+  statusPerformance.innerHTML = payload.statuses.map((item) => `<div class="stack-item"><div><strong>${item.status}</strong><p>${item.count} leads</p></div><span class="pill pill-neutral">${currency.format(item.revenue || 0)}</span></div>`).join('')
 }
 
 async function refreshOperationalViews() {
