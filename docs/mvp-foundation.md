@@ -2,25 +2,28 @@
 
 ## Evolução desta iteração
 
-O projeto saiu de uma demo puramente client-side e passou a ter uma fundação full-stack leve:
+O projeto saiu de uma demo consultiva para um MVP local já com duas operações centrais do produto:
 
-- API HTTP local para dashboard, leads, summary, pipeline, tasks e analytics;
+- criação manual de lead no app;
+- movimentação de lead entre etapas do pipeline;
+- API HTTP local para dashboard, leads, summary, pipeline, tasks, analytics e stages;
 - persistência SQLite com schema inicial e seed automática;
 - frontend desacoplado do mock local e consumindo endpoints reais;
-- testes unitários cobrindo seed, filtros, summary e dashboard.
+- testes unitários cobrindo seed, filtros, summary, dashboard e mutações do lead.
 
 ## O que isso valida melhor agora
 
-1. **Contrato de dados** entre frontend e backend.
-2. **Estrutura de domínios centrais**: leads, stages, tasks e onboarding.
-3. **Migração futura** para Next.js + Supabase com menos retrabalho no modelo.
+1. **Fluxo operacional real** de entrada e progressão do lead.
+2. **Contrato de dados** entre frontend e backend.
+3. **Estrutura de domínios centrais**: leads, stages, tasks e onboarding.
+4. **Migração futura** para Next.js + Supabase com menos retrabalho no modelo.
 
 ## Próxima fase sugerida
 
 ### Produto
-- CRUD real de leads
-- mover lead de etapa
+- CRUD completo de leads
 - concluir task
+- registrar notas e timeline
 - autenticação de workspace
 
 ### Plataforma

@@ -37,6 +37,26 @@ class RevenueOSTestCase(unittest.TestCase):
         self.assertEqual(len(dashboard['kpis']), 4)
         self.assertEqual(len(dashboard['priorities']), 3)
 
+    def test_create_lead(self):
+        lead = server.create_lead(
+            self.conn,
+            {
+                'name': 'Novo Lead',
+                'company': 'Empresa X',
+                'owner': 'Bia',
+                'source': 'Manual',
+                'temperature': 'hot',
+                'value': 9900,
+            },
+        )
+        self.assertEqual(lead['name'], 'Novo Lead')
+        self.assertEqual(lead['stageId'], 'entry')
+
+    def test_update_lead_stage(self):
+        lead = server.update_lead_stage(self.conn, 'lead-2', 'proposal')
+        self.assertIsNotNone(lead)
+        self.assertEqual(lead['stageId'], 'proposal')
+
 
 if __name__ == '__main__':
     unittest.main()

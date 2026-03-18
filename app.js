@@ -11,6 +11,7 @@ const state = {
   temperature: 'all',
   selectedLeadId: null,
   leads: [],
+  stages: [],
 }
 
 const titleByView = {
@@ -26,6 +27,8 @@ const navItems = [...document.querySelectorAll('.nav-item')]
 const searchInput = document.querySelector('#lead-search')
 const ownerFilter = document.querySelector('#owner-filter')
 const temperatureFilter = document.querySelector('#temperature-filter')
+const leadForm = document.querySelector('#lead-form')
+const leadFormFeedback = document.querySelector('#lead-form-feedback')
 const kpiGrid = document.querySelector('#kpi-grid')
 const priorityList = document.querySelector('#priority-list')
 const priorityPill = document.querySelector('#priority-pill')
@@ -37,10 +40,20 @@ const onboardingList = document.querySelector('#onboarding-list')
 const insightsList = document.querySelector('#insights-list')
 const sourcePerformance = document.querySelector('#source-performance')
 
-async function fetchJson(url) {
-  const response = await fetch(url)
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`)
-  return response.json()
+async function request(url, options = {}) {
+  const response = await fetch(url, {
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`)
+  return data
+}
+
+function stageOptions(selectedStageId) {
+  return state.stages
+    .map((stage) => `<option value="${stage.id}" ${stage.id === selectedStageId ? 'selected' : ''}>${stage.name}</option>`)
+    .join('')
 }
 
 function setView(view) {
@@ -66,8 +79,13 @@ function renderFilters() {
   temperatureFilter.value = state.temperature
 }
 
+async function loadStages() {
+  const payload = await request('/api/stages')
+  state.stages = payload.items
+}
+
 async function loadDashboard() {
-  const dashboard = await fetchJson('/api/dashboard')
+  const dashboard = await request('/api/dashboard')
   kpiGrid.innerHTML = dashboard.kpis
     .map(
       (kpi) => `
@@ -102,19 +120,23 @@ async function loadLeads() {
     owner: state.owner,
     temperature: state.temperature,
   })
-  const payload = await fetchJson(`/api/leads?${params.toString()}`)
+  const payload = await request(`/api/leads?${params.toString()}`)
   state.leads = payload.items
   if (!state.selectedLeadId && state.leads[0]) state.selectedLeadId = state.leads[0].id
   renderFilters()
   leadsTableBody.innerHTML = state.leads
     .map(
       (lead) => `
-        <tr data-select-lead="${lead.id}">
+        <tr>
           <td>
-            <strong>${lead.name}</strong>
-            <div class="table-sub">${lead.company} · ${lead.source}</div>
+            <button class="table-lead-button" data-select-lead="${lead.id}">
+              <strong>${lead.name}</strong>
+              <div class="table-sub">${lead.company} · ${lead.source}</div>
+            </button>
           </td>
-          <td>${lead.stageName}</td>
+          <td>
+            <select class="stage-select" data-stage-select="${lead.id}">${stageOptions(lead.stageId)}</select>
+          </td>
           <td>${lead.owner}</td>
           <td><span class="temp temp-${lead.temperature}">${lead.temperature}</span></td>
           <td>${lead.nextAction}</td>
@@ -128,7 +150,7 @@ async function loadLeads() {
 
 async function loadSummary(leadId) {
   if (!leadId) return
-  const lead = await fetchJson(`/api/leads/${leadId}/summary`)
+  const lead = await request(`/api/leads/${leadId}/summary`)
   aiSummary.innerHTML = `
     <div class="summary-block">
       <span class="eyebrow">${lead.name} · ${lead.company}</span>
@@ -150,7 +172,7 @@ async function loadSummary(leadId) {
 }
 
 async function loadPipeline() {
-  const payload = await fetchJson('/api/pipeline')
+  const payload = await request('/api/pipeline')
   pipelineBoard.innerHTML = payload.stages
     .map(
       (stage) => `
@@ -181,7 +203,7 @@ async function loadPipeline() {
 }
 
 async function loadTasks() {
-  const payload = await fetchJson('/api/tasks')
+  const payload = await request('/api/tasks')
   taskList.innerHTML = payload.tasks
     .map(
       (task) => `
@@ -212,7 +234,7 @@ async function loadTasks() {
 }
 
 async function loadAnalytics() {
-  const payload = await fetchJson('/api/analytics')
+  const payload = await request('/api/analytics')
   insightsList.innerHTML = payload.insights
     .map(
       (insight) => `
@@ -241,6 +263,34 @@ async function loadAnalytics() {
     .join('')
 }
 
+async function refreshOperationalViews() {
+  await Promise.all([loadDashboard(), loadLeads(), loadPipeline(), loadAnalytics()])
+  if (state.selectedLeadId) await loadSummary(state.selectedLeadId)
+}
+
+async function createLead(form) {
+  const formData = new FormData(form)
+  const payload = Object.fromEntries(formData.entries())
+  payload.value = Number(payload.value || 0)
+  const lead = await request('/api/leads', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  state.selectedLeadId = lead.id
+  await refreshOperationalViews()
+  await loadSummary(lead.id)
+  form.reset()
+  leadFormFeedback.textContent = `Lead ${lead.name} criado com sucesso.`
+}
+
+async function moveLeadStage(leadId, stageId) {
+  await request(`/api/leads/${leadId}/stage`, {
+    method: 'PATCH',
+    body: JSON.stringify({ stageId }),
+  })
+  await refreshOperationalViews()
+}
+
 function attachEvents() {
   navItems.forEach((item) => item.addEventListener('click', () => setView(item.dataset.view)))
   searchInput.addEventListener('input', async (event) => {
@@ -255,6 +305,15 @@ function attachEvents() {
     state.temperature = event.target.value
     await loadLeads()
   })
+  leadForm.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    try {
+      await createLead(event.currentTarget)
+      setView('leads')
+    } catch (error) {
+      leadFormFeedback.textContent = error.message
+    }
+  })
   document.body.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-select-lead]')
     if (!button) return
@@ -262,10 +321,21 @@ function attachEvents() {
     await loadSummary(state.selectedLeadId)
     setView('dashboard')
   })
+  document.body.addEventListener('change', async (event) => {
+    const select = event.target.closest('[data-stage-select]')
+    if (!select) return
+    try {
+      await moveLeadStage(select.dataset.stageSelect, select.value)
+      setView('pipeline')
+    } catch (error) {
+      leadFormFeedback.textContent = error.message
+    }
+  })
 }
 
 async function init() {
   try {
+    await loadStages()
     await Promise.all([loadDashboard(), loadLeads(), loadPipeline(), loadTasks(), loadAnalytics()])
     if (state.selectedLeadId) await loadSummary(state.selectedLeadId)
     attachEvents()

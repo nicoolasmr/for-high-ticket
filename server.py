@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / 'revenue_os.db'
@@ -310,6 +311,60 @@ def fetch_tasks(conn: sqlite3.Connection) -> dict:
     }
 
 
+def create_lead(conn: sqlite3.Connection, payload: dict) -> dict:
+    lead_id = f"lead-{uuid4().hex[:8]}"
+    stage_id = payload.get('stageId') or 'entry'
+    conn.execute(
+        '''
+        insert into leads (
+            id, name, company, owner, source, stage_id, temperature, value, next_action, status,
+            last_reply_hours, summary_text, objections_json, signals_json, next_best_action, suggested_reply
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''',
+        (
+            lead_id,
+            payload['name'],
+            payload.get('company', 'Sem empresa'),
+            payload.get('owner', 'Unassigned'),
+            payload.get('source', 'Manual'),
+            stage_id,
+            payload.get('temperature', 'warm'),
+            int(payload.get('value', 0)),
+            payload.get('nextAction', 'Hoje, 17:00'),
+            'Novo lead',
+            0,
+            payload.get('summaryText', 'Lead criado manualmente no workspace.'),
+            json.dumps(payload.get('objections', ['Sem objeções mapeadas ainda'])),
+            json.dumps(payload.get('signals', ['Lead recém-criado'])),
+            payload.get('nextBestAction', 'Realizar primeiro contato e qualificação.'),
+            payload.get('suggestedReply', 'Olá! Quero entender seu cenário e te mostrar como o Revenue OS pode ajudar.'),
+        ),
+    )
+    conn.commit()
+    row = conn.execute(
+        'select leads.*, stages.name as stage_name from leads join stages on stages.id = leads.stage_id where leads.id = ?',
+        (lead_id,),
+    ).fetchone()
+    return serialize_lead(row)
+
+
+def update_lead_stage(conn: sqlite3.Connection, lead_id: str, stage_id: str) -> dict | None:
+    conn.execute('update leads set stage_id = ?, status = ? where id = ?', (stage_id, 'Etapa atualizada', lead_id))
+    if conn.total_changes == 0:
+        return None
+    conn.commit()
+    row = conn.execute(
+        'select leads.*, stages.name as stage_name from leads join stages on stages.id = leads.stage_id where leads.id = ?',
+        (lead_id,),
+    ).fetchone()
+    return serialize_lead(row) if row else None
+
+
+def fetch_stages(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute('select id, name from stages order by order_index asc').fetchall()
+    return [dict(row) for row in rows]
+
+
 def fetch_analytics(conn: sqlite3.Connection) -> dict:
     sources = conn.execute('select source, count(*) as count, sum(value) as revenue from leads group by source order by revenue desc').fetchall()
     insights = [
@@ -325,6 +380,20 @@ def fetch_analytics(conn: sqlite3.Connection) -> dict:
 
 
 class RevenueOSHandler(SimpleHTTPRequestHandler):
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith('/api/'):
+            self.write_json({'error': 'Not found'}, status=404)
+            return
+        self.handle_api_write(parsed, method='POST')
+
+    def do_PATCH(self) -> None:
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith('/api/'):
+            self.write_json({'error': 'Not found'}, status=404)
+            return
+        self.handle_api_write(parsed, method='PATCH')
+
     def __init__(self, *args, directory: str | None = None, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
@@ -338,6 +407,11 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
         elif parsed.path == '/':
             self.path = '/index.html'
         super().do_GET()
+
+    def read_json_body(self) -> dict:
+        length = int(self.headers.get('Content-Length', '0'))
+        body = self.rfile.read(length) if length else b'{}'
+        return json.loads(body.decode('utf-8'))
 
     def handle_api_get(self, parsed) -> None:
         params = parse_qs(parsed.query)
@@ -366,6 +440,28 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                 return self.write_json(fetch_tasks(conn))
             if parsed.path == '/api/analytics':
                 return self.write_json(fetch_analytics(conn))
+            if parsed.path == '/api/stages':
+                return self.write_json({'items': fetch_stages(conn)})
+        self.write_json({'error': 'Not found'}, status=404)
+
+    def handle_api_write(self, parsed, method: str) -> None:
+        payload = self.read_json_body()
+        with get_connection() as conn:
+            if method == 'POST' and parsed.path == '/api/leads':
+                required = ['name']
+                missing = [field for field in required if not payload.get(field)]
+                if missing:
+                    return self.write_json({'error': 'Missing fields: ' + ', '.join(missing)}, status=400)
+                lead = create_lead(conn, payload)
+                return self.write_json(lead, status=201)
+            if method == 'PATCH' and parsed.path.startswith('/api/leads/') and parsed.path.endswith('/stage'):
+                lead_id = parsed.path.split('/')[3]
+                if not payload.get('stageId'):
+                    return self.write_json({'error': 'stageId is required'}, status=400)
+                lead = update_lead_stage(conn, lead_id, payload['stageId'])
+                if lead is None:
+                    return self.write_json({'error': 'Lead not found'}, status=404)
+                return self.write_json(lead)
         self.write_json({'error': 'Not found'}, status=404)
 
     def write_json(self, payload: dict, status: int = 200) -> None:

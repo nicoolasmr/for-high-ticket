@@ -81,32 +81,57 @@
         </section>
 
         <section class="view-stack hidden" id="leads-view">
-          <div class="glass-card">
-            <div class="section-header">
-              <div>
-                <span class="label">Lead Inbox</span>
-                <h2>Leads priorizados por urgência</h2>
+          <div class="dashboard-grid">
+            <div class="glass-card">
+              <div class="section-header">
+                <div>
+                  <span class="label">Novo lead</span>
+                  <h2>Cadastro rápido</h2>
+                </div>
               </div>
-              <div class="filter-row">
-                <select id="owner-filter" aria-label="Filtrar por owner"></select>
-                <select id="temperature-filter" aria-label="Filtrar por temperatura"></select>
-              </div>
+              <form id="lead-form" class="lead-form">
+                <input name="name" type="text" placeholder="Nome do lead" required />
+                <input name="company" type="text" placeholder="Empresa" />
+                <input name="owner" type="text" placeholder="Owner" />
+                <input name="source" type="text" placeholder="Origem" />
+                <input name="value" type="number" min="0" placeholder="Valor estimado" />
+                <select name="temperature">
+                  <option value="warm">warm</option>
+                  <option value="hot">hot</option>
+                  <option value="cold">cold</option>
+                </select>
+                <button class="button button-primary button-block" type="submit">Criar lead</button>
+              </form>
+              <p id="lead-form-feedback" class="form-feedback"></p>
             </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Lead</th>
-                    <th>Etapa</th>
-                    <th>Owner</th>
-                    <th>Temperatura</th>
-                    <th>Próxima ação</th>
-                    <th>Valor</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody id="leads-table-body"></tbody>
-              </table>
+
+            <div class="glass-card">
+              <div class="section-header">
+                <div>
+                  <span class="label">Lead Inbox</span>
+                  <h2>Leads priorizados por urgência</h2>
+                </div>
+                <div class="filter-row">
+                  <select id="owner-filter" aria-label="Filtrar por owner"></select>
+                  <select id="temperature-filter" aria-label="Filtrar por temperatura"></select>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Lead</th>
+                      <th>Etapa</th>
+                      <th>Owner</th>
+                      <th>Temperatura</th>
+                      <th>Próxima ação</th>
+                      <th>Valor</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="leads-table-body"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -172,6 +197,6 @@
       </main>
     </div>
 
-    <script type="module" src="app.js"></script>
+    <script src="app.js"></script>
   </body>
 </html>
