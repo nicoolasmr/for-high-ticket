@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Revenue OS App | Interactive MVP</title>
+    <meta name="description" content="Demo interativa do Revenue OS com leads, pipeline, follow-up, analytics e resumo IA." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="app-body">
+    <div class="app-shell">
+      <aside class="sidebar glass-card">
+        <div>
+          <a class="brand" href="index.html">Revenue OS</a>
+          <p class="sidebar-copy">Cockpit comercial para operações high ticket.</p>
+        </div>
+        <nav class="sidebar-nav" aria-label="Navegação principal">
+          <button class="nav-item active" data-view="dashboard">Dashboard</button>
+          <button class="nav-item" data-view="leads">Leads</button>
+          <button class="nav-item" data-view="pipeline">Pipeline</button>
+          <button class="nav-item" data-view="tasks">Tasks</button>
+          <button class="nav-item" data-view="analytics">Analytics</button>
+        </nav>
+        <div class="workspace-box">
+          <span class="label">Workspace</span>
+          <strong id="workspace-name">High Ticket Labs</strong>
+          <small id="workspace-meta">Growth plan · Trial ativo</small>
+          <select id="workspace-switcher" aria-label="Selecionar workspace"></select>
+        </div>
+      </aside>
+
+      <main class="main-panel">
+        <header class="toolbar glass-card">
+          <div>
+            <span class="eyebrow">Revenue OS demo</span>
+            <h1 id="view-title">Dashboard operacional</h1>
+          </div>
+          <div class="toolbar-actions">
+            <label class="search-field" for="lead-search">
+              <span>Buscar lead</span>
+              <input id="lead-search" type="search" placeholder="Nome, empresa ou origem" />
+            </label>
+            <a class="button button-ghost" href="index.html">Voltar ao site</a>
+          </div>
+        </header>
+
+        <section class="view-stack" id="dashboard-view">
+          <div class="stat-grid four-up" id="kpi-grid"></div>
+          <div class="dashboard-grid">
+            <section class="glass-card">
+              <div class="section-header">
+                <div>
+                  <span class="label">Prioridades</span>
+                  <h2>Fila de execução</h2>
+                </div>
+                <span class="pill pill-danger" id="priority-pill"></span>
+              </div>
+              <div id="priority-list" class="stack-list"></div>
+            </section>
+
+            <section class="glass-card">
+              <div class="section-header">
+                <div>
+                  <span class="label">Inteligência comercial</span>
+                  <h2>Resumo IA do lead selecionado</h2>
+                </div>
+              </div>
+              <div id="ai-summary" class="ai-summary"></div>
+              <div class="status-actions">
+                <button id="mark-won-button" class="button button-primary small-button" type="button">Marcar ganho</button>
+                <button id="mark-lost-button" class="button button-ghost small-button" type="button">Marcar perdido</button>
+              </div>
+              <div class="section-header section-header-inline">
+                <div>
+                  <span class="label">Timeline do lead</span>
+                  <h3>Eventos recentes</h3>
+                </div>
+              </div>
+              <div id="timeline-list" class="stack-list"></div>
+              <div class="section-header section-header-inline">
+                <div>
+                  <span class="label">Notas do lead</span>
+                  <h3>Contexto comercial</h3>
+                </div>
+              </div>
+              <form id="note-form" class="lead-form compact-form">
+                <input name="author" type="text" placeholder="Autor" />
+                <textarea name="body" rows="3" placeholder="Registrar contexto, objeção ou próximo passo" required></textarea>
+                <button class="button button-ghost" type="submit">Adicionar nota</button>
+              </form>
+              <p id="note-form-feedback" class="form-feedback"></p>
+              <div id="notes-list" class="stack-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view-stack hidden" id="leads-view">
+          <div class="dashboard-grid">
+            <div class="glass-card">
+              <div class="section-header">
+                <div><span class="label">Novo lead</span><h2>Cadastro rápido</h2></div>
+              </div>
+              <form id="lead-form" class="lead-form">
+                <input name="name" type="text" placeholder="Nome do lead" required />
+                <input name="company" type="text" placeholder="Empresa" />
+                <select id="lead-owner" name="owner"></select>
+                <input name="source" type="text" placeholder="Origem" />
+                <input name="value" type="number" min="0" placeholder="Valor estimado" />
+                <select name="temperature">
+                  <option value="warm">warm</option>
+                  <option value="hot">hot</option>
+                  <option value="cold">cold</option>
+                </select>
+                <button class="button button-primary button-block" type="submit">Criar lead</button>
+              </form>
+              <p id="lead-form-feedback" class="form-feedback"></p>
+            </div>
+
+            <div class="glass-card">
+              <div class="section-header">
+                <div><span class="label">Lead Inbox</span><h2>Leads priorizados por urgência</h2></div>
+                <div class="filter-row">
+                  <select id="owner-filter" aria-label="Filtrar por owner"></select>
+                  <select id="temperature-filter" aria-label="Filtrar por temperatura"></select>
+                  <select id="status-filter" aria-label="Filtrar por status"></select>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Lead</th><th>Etapa</th><th>Owner</th><th>Temperatura</th><th>Próxima ação</th><th>Valor</th><th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="leads-table-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view-stack hidden" id="pipeline-view"><div class="glass-card"><div class="section-header"><div><span class="label">Pipeline</span><h2>Kanban comercial do workspace</h2></div></div><div id="pipeline-board" class="pipeline-board"></div></div></section>
+
+        <section class="view-stack hidden" id="tasks-view">
+          <div class="dashboard-grid">
+            <section class="glass-card">
+              <div class="section-header"><div><span class="label">Nova task</span><h2>Criar follow-up</h2></div></div>
+              <form id="task-form" class="lead-form compact-form">
+                <input name="title" type="text" placeholder="Título da task" required />
+                <input name="leadId" type="text" placeholder="Lead ID opcional" />
+                <input name="dueTime" type="text" placeholder="Hoje, 17:00" />
+                <select name="priority"><option value="medium">medium</option><option value="high">high</option><option value="urgent">urgent</option></select>
+                <button class="button button-primary" type="submit">Criar task</button>
+              </form>
+              <p id="task-form-feedback" class="form-feedback"></p>
+            </section>
+            <section class="glass-card">
+              <div class="section-header"><div><span class="label">Tasks de hoje</span><h2>Execução comercial</h2></div><span class="pill pill-success" id="completed-count-pill"></span></div>
+              <div id="task-list" class="stack-list"></div>
+            </section>
+            <section class="glass-card"><div class="section-header"><div><span class="label">Onboarding</span><h2>Checklist de ativação</h2></div></div><div id="onboarding-list" class="stack-list"></div></section>
+          </div>
+        </section>
+
+        <section class="view-stack hidden" id="analytics-view"><div class="dashboard-grid analytics-grid"><section class="glass-card"><div class="section-header"><div><span class="label">Insights</span><h2>Leituras automáticas</h2></div></div><div id="insights-list" class="stack-list"></div></section><section class="glass-card"><div class="section-header"><div><span class="label">Receita</span><h2>Resumo por origem</h2></div></div><div id="source-performance" class="stack-list"></div></section><section class="glass-card"><div class="section-header"><div><span class="label">Owners</span><h2>Resumo por owner</h2></div></div><div id="owner-performance" class="stack-list"></div></section><section class="glass-card"><div class="section-header"><div><span class="label">Status</span><h2>Resumo por status</h2></div></div><div id="status-performance" class="stack-list"></div></section>
+            <section class="glass-card">
+              <div class="section-header"><div><span class="label">Time</span><h2>Convites e ownership</h2></div></div>
+              <form id="team-form" class="lead-form compact-form">
+                <input name="name" type="text" placeholder="Nome do membro" required />
+                <select name="role"><option value="rep">rep</option><option value="manager">manager</option><option value="admin">admin</option></select>
+                <button class="button button-ghost" type="submit">Convidar membro</button>
+              </form>
+              <p id="team-form-feedback" class="form-feedback"></p>
+              <div id="team-list" class="stack-list"></div>
+            </section>
+</div></section>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
