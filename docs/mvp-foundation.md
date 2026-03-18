@@ -4,7 +4,7 @@
 
 O MVP local agora cobre uma base operacional mais próxima do produto:
 
-- time comercial com convites básicos;
+- time comercial com memberships, convites locais e aceite no app;
 - ownership reutilizado na criação e leitura de leads;
 - filtro por status no lead inbox;
 - timeline de eventos por lead;
@@ -12,7 +12,9 @@ O MVP local agora cobre uma base operacional mais próxima do produto:
 - tasks de follow-up com conclusão;
 - notas persistidas por lead;
 - analytics por origem, owner e status;
-- suporte inicial a workspaces no backend e na UI.
+- suporte a auth demo, memberships iniciais e workspaces no backend e na UI;
+- proteção das rotas operacionais para evitar leitura/escrita fora do workspace ativo;
+- analytics e convites restritos a perfis de gestão.
 
 ## O que isso valida melhor agora
 
@@ -25,18 +27,15 @@ O MVP local agora cobre uma base operacional mais próxima do produto:
 
 Ainda não existem:
 
-- autenticação real;
-- membership de usuários por workspace;
-- permissões por papel;
-- convites por email;
+- RBAC completo além dos gates atuais de manager/admin em analytics e convites;
+- convites por email/aceite completo;
 - billing;
 - automações e integrações externas.
 
 ## Próxima fase sugerida
 
-1. autenticação e sessão;
-2. memberships reais por workspace;
-3. permissões por papel;
-4. filtros avançados e views salvas;
-5. automações comerciais;
-6. billing e access model.
+1. expandir permissões por papel para CRUD granular e trilhas de aprovação;
+2. convites por email e gestão completa de membros;
+3. filtros avançados e views salvas;
+4. automações comerciais;
+5. billing e access model.

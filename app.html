@@ -25,6 +25,11 @@
         <div class="auth-hints">
           <small><strong>Workspace default:</strong> carla@highticketlabs.com / demo123</small>
           <small><strong>Workspace clinics:</strong> bruna@clinicsalesops.com / demo123</small>
+          <small><strong>Convite pendente:</strong> bia@invitee.com / demo123</small>
+        </div>
+        <div id="invite-panel" class="hidden">
+          <span class="label">Convites pendentes</span>
+          <div id="invite-list" class="stack-list"></div>
         </div>
       </div>
     </section>
@@ -189,6 +194,7 @@
               <div class="section-header"><div><span class="label">Time</span><h2>Convites e ownership</h2></div></div>
               <form id="team-form" class="lead-form compact-form">
                 <input name="name" type="text" placeholder="Nome do membro" required />
+                <input name="email" type="email" placeholder="Email do membro" required />
                 <select name="role"><option value="rep">rep</option><option value="manager">manager</option><option value="admin">admin</option></select>
                 <button class="button button-ghost" type="submit">Convidar membro</button>
               </form>

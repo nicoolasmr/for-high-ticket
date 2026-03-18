@@ -1,6 +1,14 @@
+from http.client import HTTPConnection
+import json
 from pathlib import Path
+import sys
 import tempfile
+from threading import Thread
 import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import server
 
@@ -15,6 +23,16 @@ class RevenueOSTestCase(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
         self.temp_dir.cleanup()
+
+    def test_get_connection_uses_current_db_path_by_default(self):
+        original_db_path = server.DB_PATH
+        try:
+            server.DB_PATH = self.db_path
+            with server.get_connection() as conn:
+                count = conn.execute('select count(*) as count from workspaces').fetchone()['count']
+            self.assertGreaterEqual(count, 2)
+        finally:
+            server.DB_PATH = original_db_path
 
     def test_seeded_leads_exist(self):
         leads = server.fetch_leads(self.conn)
@@ -80,9 +98,16 @@ class RevenueOSTestCase(unittest.TestCase):
         self.assertIsNotNone(session)
         self.assertEqual(session['user']['name'], 'Carla')
         self.assertEqual({workspace['id'] for workspace in session['workspaces']}, {'ws-default'})
+        self.assertEqual(session['invites'], [])
         fetched = server.fetch_session(self.conn, session['token'])
         self.assertIsNotNone(fetched)
         self.assertEqual(fetched['user']['email'], 'carla@highticketlabs.com')
+
+    def test_membership_role_helpers(self):
+        membership = server.fetch_membership(self.conn, 'user-3', 'ws-default')
+        self.assertEqual(membership['role'], 'rep')
+        self.assertTrue(server.role_allows('admin', ('admin', 'manager')))
+        self.assertFalse(server.role_allows('rep', ('admin', 'manager')))
 
     def test_create_and_fetch_note(self):
         note = server.create_note(self.conn, 'lead-1', {'author': 'Carla', 'body': 'Lead pediu validação de ROI.'})
@@ -102,10 +127,94 @@ class RevenueOSTestCase(unittest.TestCase):
         self.assertTrue(any(item['eventType'] == 'note_added' for item in timeline))
 
     def test_team_invite(self):
-        member = server.invite_team_member(self.conn, {'name': 'Bia', 'role': 'rep'})
+        member = server.invite_team_member(self.conn, {'name': 'Bia', 'email': 'bia@example.com', 'role': 'rep'})
         self.assertEqual(member['name'], 'Bia')
+        self.assertEqual(member['status'], 'invited')
         team = server.fetch_team(self.conn)
         self.assertTrue(any(item['name'] == 'Bia' for item in team))
+
+    def test_accept_team_invite(self):
+        member = server.invite_team_member(self.conn, {'name': 'Bia', 'email': 'bia@example.com', 'role': 'rep'})
+        accepted = server.accept_team_invite(self.conn, member['id'], 'ws-default')
+        self.assertIsNotNone(accepted)
+        self.assertEqual(accepted['status'], 'active')
+
+    def test_invited_user_session_lists_pending_invites(self):
+        session = server.authenticate(self.conn, 'bia@invitee.com', 'demo123')
+        self.assertIsNotNone(session)
+        self.assertEqual(session['workspaces'], [])
+        self.assertEqual({invite['id'] for invite in session['invites']}, {'ws-default'})
+
+
+class RevenueOSHttpTestCase(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp_dir.name) / 'http-test.db'
+        server.init_db(self.db_path)
+        self.httpd = server.ThreadingHTTPServer(('127.0.0.1', 0), server.RevenueOSHandler)
+        self.httpd.db_path = self.db_path
+        self.port = self.httpd.server_address[1]
+        self.thread = Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+        self.session = self.login('carla@highticketlabs.com', 'demo123')
+        self.rep_session = self.login('marcos@highticketlabs.com', 'demo123')
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=2)
+        self.temp_dir.cleanup()
+
+    def request(self, method, path, payload=None, token=None):
+        conn = HTTPConnection('127.0.0.1', self.port, timeout=5)
+        headers = {}
+        body = None
+        if payload is not None:
+            body = json.dumps(payload)
+            headers['Content-Type'] = 'application/json'
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+        conn.request(method, path, body=body, headers=headers)
+        response = conn.getresponse()
+        data = json.loads(response.read().decode('utf-8'))
+        conn.close()
+        return response.status, data
+
+    def login(self, email, password):
+        status, payload = self.request('POST', '/api/auth/login', {'email': email, 'password': password})
+        self.assertEqual(status, 200)
+        return payload
+
+    def test_dashboard_requires_authentication(self):
+        status, payload = self.request('GET', '/api/dashboard?workspace=ws-default')
+        self.assertEqual(status, 401)
+        self.assertEqual(payload['error'], 'Unauthorized')
+
+    def test_dashboard_priority_tasks_are_workspace_scoped(self):
+        status, payload = self.request('GET', '/api/dashboard?workspace=ws-default', token=self.session['token'])
+        self.assertEqual(status, 200)
+        priorities_kpi = next(item for item in payload['kpis'] if item['label'] == 'Tasks prioritárias')
+        self.assertEqual(priorities_kpi['value'], 3)
+
+    def test_cross_workspace_lead_summary_is_forbidden(self):
+        status, payload = self.request('GET', '/api/leads/lead-3/summary', token=self.session['token'])
+        self.assertEqual(status, 403)
+        self.assertEqual(payload['error'], 'Forbidden')
+
+    def test_rep_cannot_access_analytics(self):
+        status, payload = self.request('GET', '/api/analytics?workspace=ws-default', token=self.rep_session['token'])
+        self.assertEqual(status, 403)
+        self.assertEqual(payload['error'], 'Forbidden')
+
+    def test_cannot_create_task_for_foreign_workspace_lead(self):
+        status, payload = self.request(
+            'POST',
+            '/api/tasks',
+            {'title': 'Task inválida', 'workspaceId': 'ws-default', 'leadId': 'lead-3'},
+            token=self.session['token'],
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload['error'], 'Lead belongs to another workspace')
 
 
 if __name__ == '__main__':

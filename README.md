@@ -11,6 +11,7 @@ Esta base já cobre:
 - cliente browser em `app.js` com dashboard, lead inbox, pipeline, tasks, analytics, timeline e notas;
 - backend local em `server.py` com API HTTP, persistência SQLite e seed inicial;
 - suporte básico a **workspaces** para segmentar leads, dashboard, pipeline, analytics e time;
+- autenticação demo obrigatória para as rotas operacionais, com isolamento por workspace e gates básicos por papel;
 - testes unitários em `tests/test_server.py`.
 
 ## Estrutura do repositório
@@ -27,23 +28,23 @@ Esta base já cobre:
 
 - `GET /api/health`
 - `GET /api/workspaces`
-- `GET /api/dashboard`
-- `GET /api/leads`
-- `POST /api/leads`
-- `PATCH /api/leads/:leadId/stage`
-- `GET /api/leads/:leadId/summary`
-- `GET /api/leads/:leadId/notes`
-- `POST /api/leads/:leadId/notes`
-- `GET /api/leads/:leadId/timeline`
-- `POST /api/leads/:leadId/mark-won`
-- `POST /api/leads/:leadId/mark-lost`
-- `GET /api/pipeline`
-- `GET /api/tasks`
-- `POST /api/tasks`
-- `POST /api/tasks/:taskId/complete`
-- `GET /api/team`
-- `POST /api/team`
-- `GET /api/analytics`
+- `GET /api/dashboard` *(requer sessão)*
+- `GET /api/leads` *(requer sessão)*
+- `POST /api/leads` *(requer sessão)*
+- `PATCH /api/leads/:leadId/stage` *(requer sessão)*
+- `GET /api/leads/:leadId/summary` *(requer sessão)*
+- `GET /api/leads/:leadId/notes` *(requer sessão)*
+- `POST /api/leads/:leadId/notes` *(requer sessão)*
+- `GET /api/leads/:leadId/timeline` *(requer sessão)*
+- `POST /api/leads/:leadId/mark-won` *(requer sessão)*
+- `POST /api/leads/:leadId/mark-lost` *(requer sessão)*
+- `GET /api/pipeline` *(requer sessão)*
+- `GET /api/tasks` *(requer sessão)*
+- `POST /api/tasks` *(requer sessão)*
+- `POST /api/tasks/:taskId/complete` *(requer sessão)*
+- `GET /api/team` *(requer sessão)*
+- `POST /api/team` *(requer sessão + admin/manager)*
+- `GET /api/analytics` *(requer sessão + admin/manager)*
 
 ## Como rodar localmente
 
@@ -62,12 +63,11 @@ Depois abra:
 - execução diária via follow-ups e tasks;
 - leitura de contexto por lead com resumo, notas e timeline;
 - visão gerencial básica por origem, owner e status;
-- operação em múltiplos workspaces de forma simplificada.
+- operação em múltiplos workspaces com auth demo, memberships ativas/pendentes e isolamento consistente dos dados por workspace.
 
 ## Próximos passos naturais
 
-- autenticação e sessão;
-- membership real por workspace;
 - permissões por papel;
+- convites por email e onboarding real de membros;
 - filtros salvos e automações;
 - billing e access model.

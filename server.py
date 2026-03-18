@@ -16,10 +16,14 @@ SEED_WORKSPACES = [('ws-default', 'High Ticket Labs'), ('ws-clinics', 'Clinic Sa
 SEED_USERS = [
     ('user-1', 'Carla', 'carla@highticketlabs.com', 'demo123'),
     ('user-2', 'Bruna', 'bruna@clinicsalesops.com', 'demo123'),
+    ('user-3', 'Marcos', 'marcos@highticketlabs.com', 'demo123'),
+    ('user-4', 'Bia', 'bia@invitee.com', 'demo123'),
 ]
 SEED_MEMBERSHIPS = [
-    ('user-1', 'ws-default', 'admin'),
-    ('user-2', 'ws-clinics', 'admin'),
+    ('user-1', 'ws-default', 'admin', 'active'),
+    ('user-2', 'ws-clinics', 'admin', 'active'),
+    ('user-3', 'ws-default', 'rep', 'active'),
+    ('user-4', 'ws-default', 'rep', 'invited'),
 ]
 
 SEED_STAGES = [
@@ -141,8 +145,8 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 
-def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
+def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path or DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -152,7 +156,7 @@ def has_column(conn: sqlite3.Connection, table_name: str, column_name: str) -> b
     return any(column['name'] == column_name for column in columns)
 
 
-def init_db(db_path: Path = DB_PATH) -> None:
+def init_db(db_path: Path | None = None) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(
             '''
@@ -172,7 +176,8 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 id integer primary key autoincrement,
                 user_id text not null references users(id),
                 workspace_id text not null references workspaces(id),
-                role text not null
+                role text not null,
+                status text not null default 'active'
             );
 
             create table if not exists sessions (
@@ -265,6 +270,9 @@ def init_db(db_path: Path = DB_PATH) -> None:
         if not has_column(conn, 'onboarding_steps', 'workspace_id'):
             conn.execute('alter table onboarding_steps add column workspace_id text references workspaces(id)')
             conn.execute("update onboarding_steps set workspace_id = 'ws-default' where workspace_id is null")
+        if not has_column(conn, 'workspace_memberships', 'status'):
+            conn.execute("alter table workspace_memberships add column status text not null default 'active'")
+            conn.execute("update workspace_memberships set status = 'active' where status is null")
         seed_db(conn)
 
 
@@ -286,7 +294,7 @@ def seed_db(conn: sqlite3.Connection) -> None:
         [(user_id, name, email, hash_password(password)) for user_id, name, email, password in SEED_USERS],
     )
     conn.executemany(
-        'insert into workspace_memberships (user_id, workspace_id, role) values (?, ?, ?)',
+        'insert into workspace_memberships (user_id, workspace_id, role, status) values (?, ?, ?, ?)',
         SEED_MEMBERSHIPS,
     )
     conn.executemany('insert into stages (id, name, order_index) values (?, ?, ?)', SEED_STAGES)
@@ -397,7 +405,10 @@ def fetch_dashboard(conn: sqlite3.Connection, workspace_id: str = 'ws-default') 
         (workspace_id,),
     ).fetchone()['count']
     revenue = conn.execute('select coalesce(sum(value), 0) as total from leads where workspace_id = ?', (workspace_id,)).fetchone()['total']
-    priority_tasks = conn.execute("select count(*) as count from tasks where priority in ('urgent', 'high') and completed = 0").fetchone()['count']
+    priority_tasks = conn.execute(
+        "select count(*) as count from tasks where workspace_id = ? and priority in ('urgent', 'high') and completed = 0",
+        (workspace_id,),
+    ).fetchone()['count']
     priorities = conn.execute('select id, name, company, owner, last_reply_hours from leads where workspace_id = ? order by last_reply_hours desc, value desc limit 3', (workspace_id,)).fetchall()
     return {
         'kpis': [
@@ -573,6 +584,22 @@ def fetch_user_workspaces(conn: sqlite3.Connection, user_id: str) -> list[dict]:
         from workspace_memberships
         join workspaces on workspaces.id = workspace_memberships.workspace_id
         where workspace_memberships.user_id = ?
+          and workspace_memberships.status = 'active'
+        order by workspaces.id asc
+        ''',
+        (user_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def fetch_user_invites(conn: sqlite3.Connection, user_id: str) -> list[dict]:
+    rows = conn.execute(
+        '''
+        select workspaces.id, workspaces.name, workspace_memberships.role, workspace_memberships.status
+        from workspace_memberships
+        join workspaces on workspaces.id = workspace_memberships.workspace_id
+        where workspace_memberships.user_id = ?
+          and workspace_memberships.status = 'invited'
         order by workspaces.id asc
         ''',
         (user_id,),
@@ -593,10 +620,12 @@ def authenticate(conn: sqlite3.Connection, email: str, password: str) -> dict | 
         return None
     token = create_session(conn, user['id'])
     workspaces = fetch_user_workspaces(conn, user['id'])
+    invites = fetch_user_invites(conn, user['id'])
     return {
         'token': token,
         'user': {'id': user['id'], 'name': user['name'], 'email': user['email']},
         'workspaces': workspaces,
+        'invites': invites,
     }
 
 
@@ -613,9 +642,11 @@ def fetch_session(conn: sqlite3.Connection, token: str) -> dict | None:
     if not row:
         return None
     workspaces = fetch_user_workspaces(conn, row['id'])
+    invites = fetch_user_invites(conn, row['id'])
     return {
         'user': {'id': row['id'], 'name': row['name'], 'email': row['email']},
         'workspaces': workspaces,
+        'invites': invites,
     }
 
 
@@ -623,17 +654,105 @@ def revoke_session(conn: sqlite3.Connection, token: str) -> None:
     conn.execute('delete from sessions where token = ?', (token,))
     conn.commit()
 
+
+def fetch_membership(conn: sqlite3.Connection, user_id: str, workspace_id: str) -> dict | None:
+    row = conn.execute(
+        'select user_id, workspace_id, role, status from workspace_memberships where user_id = ? and workspace_id = ?',
+        (user_id, workspace_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def role_allows(role: str, allowed_roles: tuple[str, ...]) -> bool:
+    return role in allowed_roles
+
+
+def fetch_active_membership(conn: sqlite3.Connection, user_id: str, workspace_id: str) -> dict | None:
+    membership = fetch_membership(conn, user_id, workspace_id)
+    if not membership or membership['status'] != 'active':
+        return None
+    return membership
+
+
+def resolve_workspace_access(conn: sqlite3.Connection, session: dict | None, requested_workspace_id: str | None) -> tuple[str | None, dict | None]:
+    if not session:
+        return None, None
+    workspaces = session.get('workspaces', [])
+    workspace_id = requested_workspace_id or (workspaces[0]['id'] if workspaces else None)
+    if not workspace_id:
+        return None, None
+    membership = fetch_active_membership(conn, session['user']['id'], workspace_id)
+    if not membership:
+        return None, None
+    return workspace_id, membership
+
+
+def fetch_lead_workspace(conn: sqlite3.Connection, lead_id: str) -> str | None:
+    row = conn.execute('select workspace_id from leads where id = ?', (lead_id,)).fetchone()
+    return row['workspace_id'] if row else None
+
 def fetch_team(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> list[dict]:
-    rows = conn.execute('select id, name, role from team_members where workspace_id = ? order by id asc', (workspace_id,)).fetchall()
+    rows = conn.execute(
+        '''
+        select users.id, users.name, users.email, workspace_memberships.role, workspace_memberships.status
+        from workspace_memberships
+        join users on users.id = workspace_memberships.user_id
+        where workspace_memberships.workspace_id = ?
+        order by users.name asc
+        ''',
+        (workspace_id,),
+    ).fetchall()
     return [dict(row) for row in rows]
 
 
 def invite_team_member(conn: sqlite3.Connection, payload: dict) -> dict:
     workspace_id = payload.get('workspaceId', 'ws-default')
-    cursor = conn.execute('insert into team_members (workspace_id, name, role) values (?, ?, ?)', (workspace_id, payload['name'], payload.get('role', 'rep')))
-    member_id = cursor.lastrowid
+    email = payload['email'].strip().lower()
+    user = conn.execute('select id, name, email from users where lower(email) = lower(?)', (email,)).fetchone()
+    if user:
+        user_id = user['id']
+        conn.execute('update users set name = ? where id = ?', (payload['name'], user_id))
+    else:
+        user_id = f'user-{uuid4().hex[:8]}'
+        conn.execute(
+            'insert into users (id, name, email, password_hash) values (?, ?, ?, ?)',
+            (user_id, payload['name'], email, hash_password('demo123')),
+        )
+    existing = fetch_membership(conn, user_id, workspace_id)
+    if existing:
+        conn.execute(
+            'update workspace_memberships set role = ?, status = ? where user_id = ? and workspace_id = ?',
+            (payload.get('role', 'rep'), 'invited', user_id, workspace_id),
+        )
+    else:
+        conn.execute(
+            'insert into workspace_memberships (user_id, workspace_id, role, status) values (?, ?, ?, ?)',
+            (user_id, workspace_id, payload.get('role', 'rep'), 'invited'),
+        )
     conn.commit()
-    return dict(conn.execute('select id, name, role from team_members where id = ?', (member_id,)).fetchone())
+    return dict(
+        conn.execute(
+            '''
+            select users.id, users.name, users.email, workspace_memberships.role, workspace_memberships.status
+            from workspace_memberships
+            join users on users.id = workspace_memberships.user_id
+            where workspace_memberships.user_id = ? and workspace_memberships.workspace_id = ?
+            ''',
+            (user_id, workspace_id),
+        ).fetchone()
+    )
+
+
+def accept_team_invite(conn: sqlite3.Connection, user_id: str, workspace_id: str) -> dict | None:
+    before = conn.total_changes
+    conn.execute(
+        "update workspace_memberships set status = 'active' where user_id = ? and workspace_id = ? and status = 'invited'",
+        (user_id, workspace_id),
+    )
+    if conn.total_changes == before:
+        return None
+    conn.commit()
+    return fetch_membership(conn, user_id, workspace_id)
 
 def fetch_analytics(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> dict:
     sources = conn.execute('select source, count(*) as count, sum(value) as revenue from leads where workspace_id = ? group by source order by revenue desc', (workspace_id,)).fetchall()
@@ -656,6 +775,13 @@ def fetch_analytics(conn: sqlite3.Connection, workspace_id: str = 'ws-default') 
 class RevenueOSHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, directory: str | None = None, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
+
+    def get_db_connection(self) -> sqlite3.Connection:
+        db_path = getattr(self.server, 'db_path', None)
+        return get_connection(db_path)
+
+    def log_message(self, format: str, *args) -> None:
+        return
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -693,9 +819,13 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
             return header.split(' ', 1)[1].strip()
         return None
 
+    def require_session(self, conn: sqlite3.Connection) -> dict | None:
+        token = self.read_bearer_token()
+        return fetch_session(conn, token) if token else None
+
     def handle_api_get(self, parsed) -> None:
         params = parse_qs(parsed.query)
-        with get_connection() as conn:
+        with self.get_db_connection() as conn:
             if parsed.path == '/api/health':
                 return self.write_json({'status': 'ok'})
             if parsed.path == '/api/auth/me':
@@ -704,30 +834,6 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                     return self.write_json({'error': 'Unauthorized'}, status=401)
                 session = fetch_session(conn, token)
                 return self.write_json(session if session else {'error': 'Unauthorized'}, status=200 if session else 401)
-            if parsed.path == '/api/dashboard':
-                return self.write_json(fetch_dashboard(conn, params.get('workspace', ['ws-default'])[0]))
-            if parsed.path == '/api/leads':
-                return self.write_json({'items': fetch_leads(conn, workspace_id=params.get('workspace', ['ws-default'])[0], search=params.get('search', [''])[0], owner=params.get('owner', ['all'])[0], temperature=params.get('temperature', ['all'])[0], status=params.get('status', ['all'])[0])})
-            if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/summary'):
-                lead_id = parsed.path.split('/')[3]
-                summary = fetch_summary(conn, lead_id)
-                return self.write_json(summary if summary else {'error': 'Lead not found'}, status=200 if summary else 404)
-            if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/notes'):
-                lead_id = parsed.path.split('/')[3]
-                return self.write_json({'items': fetch_notes(conn, lead_id)})
-            if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/timeline'):
-                lead_id = parsed.path.split('/')[3]
-                return self.write_json({'items': fetch_timeline(conn, lead_id)})
-            if parsed.path == '/api/pipeline':
-                return self.write_json({'stages': fetch_pipeline(conn, params.get('workspace', ['ws-default'])[0])})
-            if parsed.path == '/api/tasks':
-                return self.write_json(fetch_tasks(conn, params.get('workspace', ['ws-default'])[0]))
-            if parsed.path == '/api/analytics':
-                return self.write_json(fetch_analytics(conn, params.get('workspace', ['ws-default'])[0]))
-            if parsed.path == '/api/stages':
-                return self.write_json({'items': fetch_stages(conn)})
-            if parsed.path == '/api/team':
-                return self.write_json({'items': fetch_team(conn, params.get('workspace', ['ws-default'])[0])})
             if parsed.path == '/api/workspaces':
                 token = self.read_bearer_token()
                 if token:
@@ -736,11 +842,63 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                         return self.write_json({'error': 'Unauthorized'}, status=401)
                     return self.write_json({'items': session['workspaces']})
                 return self.write_json({'items': fetch_workspaces(conn)})
+
+            session = self.require_session(conn)
+            if not session:
+                return self.write_json({'error': 'Unauthorized'}, status=401)
+
+            requested_workspace_id = params.get('workspace', [None])[0]
+            workspace_id, membership = resolve_workspace_access(conn, session, requested_workspace_id)
+
+            if parsed.path in {'/api/dashboard', '/api/leads', '/api/pipeline', '/api/tasks', '/api/analytics', '/api/stages', '/api/team'} and not workspace_id:
+                return self.write_json({'error': 'Forbidden'}, status=403)
+
+            if parsed.path == '/api/dashboard':
+                return self.write_json(fetch_dashboard(conn, workspace_id))
+            if parsed.path == '/api/leads':
+                return self.write_json({'items': fetch_leads(conn, workspace_id=workspace_id, search=params.get('search', [''])[0], owner=params.get('owner', ['all'])[0], temperature=params.get('temperature', ['all'])[0], status=params.get('status', ['all'])[0])})
+            if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/summary'):
+                lead_id = parsed.path.split('/')[3]
+                lead_workspace_id = fetch_lead_workspace(conn, lead_id)
+                if not lead_workspace_id:
+                    return self.write_json({'error': 'Lead not found'}, status=404)
+                if not fetch_active_membership(conn, session['user']['id'], lead_workspace_id):
+                    return self.write_json({'error': 'Forbidden'}, status=403)
+                summary = fetch_summary(conn, lead_id)
+                return self.write_json(summary if summary else {'error': 'Lead not found'}, status=200 if summary else 404)
+            if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/notes'):
+                lead_id = parsed.path.split('/')[3]
+                lead_workspace_id = fetch_lead_workspace(conn, lead_id)
+                if not lead_workspace_id:
+                    return self.write_json({'error': 'Lead not found'}, status=404)
+                if not fetch_active_membership(conn, session['user']['id'], lead_workspace_id):
+                    return self.write_json({'error': 'Forbidden'}, status=403)
+                return self.write_json({'items': fetch_notes(conn, lead_id)})
+            if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/timeline'):
+                lead_id = parsed.path.split('/')[3]
+                lead_workspace_id = fetch_lead_workspace(conn, lead_id)
+                if not lead_workspace_id:
+                    return self.write_json({'error': 'Lead not found'}, status=404)
+                if not fetch_active_membership(conn, session['user']['id'], lead_workspace_id):
+                    return self.write_json({'error': 'Forbidden'}, status=403)
+                return self.write_json({'items': fetch_timeline(conn, lead_id)})
+            if parsed.path == '/api/pipeline':
+                return self.write_json({'stages': fetch_pipeline(conn, workspace_id)})
+            if parsed.path == '/api/tasks':
+                return self.write_json(fetch_tasks(conn, workspace_id))
+            if parsed.path == '/api/analytics':
+                if not membership or not role_allows(membership['role'], ('admin', 'manager')):
+                    return self.write_json({'error': 'Forbidden'}, status=403)
+                return self.write_json(fetch_analytics(conn, workspace_id))
+            if parsed.path == '/api/stages':
+                return self.write_json({'items': fetch_stages(conn)})
+            if parsed.path == '/api/team':
+                return self.write_json({'items': fetch_team(conn, workspace_id)})
         self.write_json({'error': 'Not found'}, status=404)
 
     def handle_api_write(self, parsed, method: str) -> None:
         payload = self.read_json_body()
-        with get_connection() as conn:
+        with self.get_db_connection() as conn:
             if method == 'POST' and parsed.path == '/api/auth/login':
                 if not payload.get('email') or not payload.get('password'):
                     return self.write_json({'error': 'email and password are required'}, status=400)
@@ -752,39 +910,91 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                     return self.write_json({'error': 'Unauthorized'}, status=401)
                 revoke_session(conn, token)
                 return self.write_json({'ok': True})
+
+            session = self.require_session(conn)
+            if not session:
+                return self.write_json({'error': 'Unauthorized'}, status=401)
+
             if method == 'POST' and parsed.path == '/api/leads':
                 if not payload.get('name'):
                     return self.write_json({'error': 'Missing fields: name'}, status=400)
+                workspace_id, membership = resolve_workspace_access(conn, session, payload.get('workspaceId'))
+                if not workspace_id or not membership:
+                    return self.write_json({'error': 'Forbidden'}, status=403)
+                payload['workspaceId'] = workspace_id
                 return self.write_json(create_lead(conn, payload), status=201)
             if method == 'PATCH' and parsed.path.startswith('/api/leads/') and parsed.path.endswith('/stage'):
                 lead_id = parsed.path.split('/')[3]
+                lead_workspace_id = fetch_lead_workspace(conn, lead_id)
+                if not lead_workspace_id:
+                    return self.write_json({'error': 'Lead not found'}, status=404)
+                if not fetch_active_membership(conn, session['user']['id'], lead_workspace_id):
+                    return self.write_json({'error': 'Forbidden'}, status=403)
                 if not payload.get('stageId'):
                     return self.write_json({'error': 'stageId is required'}, status=400)
                 lead = update_lead_stage(conn, lead_id, payload['stageId'])
                 return self.write_json(lead if lead else {'error': 'Lead not found'}, status=200 if lead else 404)
             if method == 'POST' and parsed.path.startswith('/api/leads/') and parsed.path.endswith('/notes'):
                 lead_id = parsed.path.split('/')[3]
+                lead_workspace_id = fetch_lead_workspace(conn, lead_id)
+                if not lead_workspace_id:
+                    return self.write_json({'error': 'Lead not found'}, status=404)
+                if not fetch_active_membership(conn, session['user']['id'], lead_workspace_id):
+                    return self.write_json({'error': 'Forbidden'}, status=403)
                 if not payload.get('body'):
                     return self.write_json({'error': 'body is required'}, status=400)
                 return self.write_json(create_note(conn, lead_id, payload), status=201)
             if method == 'POST' and parsed.path.startswith('/api/leads/') and parsed.path.endswith('/mark-won'):
                 lead_id = parsed.path.split('/')[3]
+                lead_workspace_id = fetch_lead_workspace(conn, lead_id)
+                if not lead_workspace_id:
+                    return self.write_json({'error': 'Lead not found'}, status=404)
+                if not fetch_active_membership(conn, session['user']['id'], lead_workspace_id):
+                    return self.write_json({'error': 'Forbidden'}, status=403)
                 lead = mark_lead_status(conn, lead_id, 'Ganho')
                 return self.write_json(lead if lead else {'error': 'Lead not found'}, status=200 if lead else 404)
             if method == 'POST' and parsed.path.startswith('/api/leads/') and parsed.path.endswith('/mark-lost'):
                 lead_id = parsed.path.split('/')[3]
+                lead_workspace_id = fetch_lead_workspace(conn, lead_id)
+                if not lead_workspace_id:
+                    return self.write_json({'error': 'Lead not found'}, status=404)
+                if not fetch_active_membership(conn, session['user']['id'], lead_workspace_id):
+                    return self.write_json({'error': 'Forbidden'}, status=403)
                 lead = mark_lead_status(conn, lead_id, 'Perdido', payload.get('lostReason'))
                 return self.write_json(lead if lead else {'error': 'Lead not found'}, status=200 if lead else 404)
             if method == 'POST' and parsed.path == '/api/team':
-                if not payload.get('name'):
-                    return self.write_json({'error': 'name is required'}, status=400)
+                workspace_id, membership = resolve_workspace_access(conn, session, payload.get('workspaceId'))
+                if not workspace_id or not membership or not role_allows(membership['role'], ('admin', 'manager')):
+                    return self.write_json({'error': 'Forbidden'}, status=403)
+                if not payload.get('name') or not payload.get('email'):
+                    return self.write_json({'error': 'name and email are required'}, status=400)
+                payload['workspaceId'] = workspace_id
                 return self.write_json(invite_team_member(conn, payload), status=201)
+            if method == 'POST' and parsed.path == '/api/team/accept-invite':
+                workspace_id = payload.get('workspaceId', 'ws-default')
+                membership = accept_team_invite(conn, session['user']['id'], workspace_id)
+                return self.write_json(membership if membership else {'error': 'Invite not found'}, status=200 if membership else 404)
             if method == 'POST' and parsed.path == '/api/tasks':
                 if not payload.get('title'):
                     return self.write_json({'error': 'title is required'}, status=400)
+                workspace_id, membership = resolve_workspace_access(conn, session, payload.get('workspaceId'))
+                if not workspace_id or not membership:
+                    return self.write_json({'error': 'Forbidden'}, status=403)
+                if payload.get('leadId'):
+                    lead_workspace_id = fetch_lead_workspace(conn, payload['leadId'])
+                    if not lead_workspace_id:
+                        return self.write_json({'error': 'Lead not found'}, status=404)
+                    if lead_workspace_id != workspace_id:
+                        return self.write_json({'error': 'Lead belongs to another workspace'}, status=400)
+                payload['workspaceId'] = workspace_id
                 return self.write_json(create_task(conn, payload), status=201)
             if method == 'POST' and parsed.path.startswith('/api/tasks/') and parsed.path.endswith('/complete'):
                 task_id = int(parsed.path.split('/')[3])
+                task_row = conn.execute('select workspace_id from tasks where id = ?', (task_id,)).fetchone()
+                if not task_row:
+                    return self.write_json({'error': 'Task not found'}, status=404)
+                if not fetch_active_membership(conn, session['user']['id'], task_row['workspace_id']):
+                    return self.write_json({'error': 'Forbidden'}, status=403)
                 task = complete_task(conn, task_id)
                 return self.write_json(task if task else {'error': 'Task not found'}, status=200 if task else 404)
         self.write_json({'error': 'Not found'}, status=404)
