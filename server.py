@@ -101,19 +101,21 @@ SEED_LEADS = [
 ]
 
 SEED_TASKS = [
-    ('lead-2', '14:00', 'Call de qualificação com Lucas Neri', 'high', 0),
-    ('lead-1', '16:30', 'Follow-up Ana Ribeiro com caso de uso', 'urgent', 0),
-    ('lead-3', '17:00', 'Confirmar call da Clínica Lumina', 'medium', 0),
-    ('lead-4', '18:00', 'Primeira resposta para Juliana Costa', 'high', 0),
+    ('ws-default', 'lead-2', '14:00', 'Call de qualificação com Lucas Neri', 'high', 0),
+    ('ws-default', 'lead-1', '16:30', 'Follow-up Ana Ribeiro com caso de uso', 'urgent', 0),
+    ('ws-clinics', 'lead-3', '17:00', 'Confirmar call da Clínica Lumina', 'medium', 0),
+    ('ws-default', 'lead-4', '18:00', 'Primeira resposta para Juliana Costa', 'high', 0),
 ]
 
 SEED_TEAM = [('ws-default', 'Carla', 'manager'), ('ws-default', 'Marcos', 'rep'), ('ws-default', 'Rafa', 'rep'), ('ws-clinics', 'Bruna', 'manager')]
 
 SEED_ONBOARDING = [
-    ('Definir nome do workspace', 1),
-    ('Configurar pipeline padrão', 1),
-    ('Importar leads iniciais', 0),
-    ('Convidar time comercial', 0),
+    ('ws-default', 'Definir nome do workspace', 1),
+    ('ws-default', 'Configurar pipeline padrão', 1),
+    ('ws-default', 'Importar leads iniciais', 0),
+    ('ws-default', 'Convidar time comercial', 0),
+    ('ws-clinics', 'Definir playbook da clínica', 1),
+    ('ws-clinics', 'Cadastrar secretárias comerciais', 0),
 ]
 
 SEED_NOTES = [
@@ -130,6 +132,11 @@ def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def has_column(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+    columns = conn.execute(f'pragma table_info({table_name})').fetchall()
+    return any(column['name'] == column_name for column in columns)
 
 
 def init_db(db_path: Path = DB_PATH) -> None:
@@ -170,6 +177,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
 
             create table if not exists tasks (
                 id integer primary key autoincrement,
+                workspace_id text references workspaces(id),
                 lead_id text references leads(id),
                 due_time text not null,
                 title text not null,
@@ -186,6 +194,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
 
             create table if not exists onboarding_steps (
                 id integer primary key autoincrement,
+                workspace_id text references workspaces(id),
                 title text not null,
                 done integer not null
             );
@@ -207,6 +216,22 @@ def init_db(db_path: Path = DB_PATH) -> None:
             );
             '''
         )
+        if not has_column(conn, 'tasks', 'workspace_id'):
+            conn.execute('alter table tasks add column workspace_id text references workspaces(id)')
+            conn.execute(
+                '''
+                update tasks
+                set workspace_id = (
+                    select leads.workspace_id
+                    from leads
+                    where leads.id = tasks.lead_id
+                )
+                where workspace_id is null
+                '''
+            )
+        if not has_column(conn, 'onboarding_steps', 'workspace_id'):
+            conn.execute('alter table onboarding_steps add column workspace_id text references workspaces(id)')
+            conn.execute("update onboarding_steps set workspace_id = 'ws-default' where workspace_id is null")
         seed_db(conn)
 
 
@@ -257,8 +282,8 @@ def seed_db(conn: sqlite3.Connection) -> None:
         ],
     )
     conn.executemany('insert into team_members (workspace_id, name, role) values (?, ?, ?)', SEED_TEAM)
-    conn.executemany('insert into tasks (lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?)', SEED_TASKS)
-    conn.executemany('insert into onboarding_steps (title, done) values (?, ?)', SEED_ONBOARDING)
+    conn.executemany('insert into tasks (workspace_id, lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?, ?)', SEED_TASKS)
+    conn.executemany('insert into onboarding_steps (workspace_id, title, done) values (?, ?, ?)', SEED_ONBOARDING)
     for lead_id, author, body in SEED_NOTES:
         conn.execute('insert into notes (lead_id, author, body, created_at) values (?, ?, ?, ?)', (lead_id, author, body, utc_now()))
         log_event(conn, lead_id, 'note_added', {'author': author, 'body': body})
@@ -357,10 +382,19 @@ def fetch_pipeline(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -
     return payload
 
 
-def fetch_tasks(conn: sqlite3.Connection) -> dict:
-    tasks = conn.execute('select id, lead_id, due_time, title, priority from tasks where completed = 0 order by due_time asc').fetchall()
-    onboarding = conn.execute('select title, done from onboarding_steps order by id asc').fetchall()
-    completed_count = conn.execute('select count(*) as count from tasks where completed = 1').fetchone()['count']
+def fetch_tasks(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> dict:
+    tasks = conn.execute(
+        'select id, workspace_id, lead_id, due_time, title, priority from tasks where workspace_id = ? and completed = 0 order by due_time asc',
+        (workspace_id,),
+    ).fetchall()
+    onboarding = conn.execute(
+        'select title, done from onboarding_steps where workspace_id = ? order by id asc',
+        (workspace_id,),
+    ).fetchall()
+    completed_count = conn.execute(
+        'select count(*) as count from tasks where workspace_id = ? and completed = 1',
+        (workspace_id,),
+    ).fetchone()['count']
     return {
         'tasks': [dict(row) for row in tasks],
         'onboarding': [{'title': row['title'], 'done': bool(row['done'])} for row in onboarding],
@@ -451,12 +485,20 @@ def create_note(conn: sqlite3.Connection, lead_id: str, payload: dict) -> dict:
 
 def create_task(conn: sqlite3.Connection, payload: dict) -> dict:
     lead_id = payload.get('leadId')
-    cursor = conn.execute('insert into tasks (lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, 0)', (lead_id, payload.get('dueTime', 'Hoje, 17:00'), payload['title'], payload.get('priority', 'medium')))
+    workspace_id = payload.get('workspaceId')
+    if lead_id:
+        lead = conn.execute('select workspace_id from leads where id = ?', (lead_id,)).fetchone()
+        workspace_id = lead['workspace_id'] if lead else workspace_id
+    workspace_id = workspace_id or 'ws-default'
+    cursor = conn.execute(
+        'insert into tasks (workspace_id, lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?, 0)',
+        (workspace_id, lead_id, payload.get('dueTime', 'Hoje, 17:00'), payload['title'], payload.get('priority', 'medium')),
+    )
     if lead_id:
         log_event(conn, lead_id, 'task_created', {'title': payload['title'], 'priority': payload.get('priority', 'medium')})
     task_id = cursor.lastrowid
     conn.commit()
-    return dict(conn.execute('select id, lead_id, due_time, title, priority from tasks where id = ?', (task_id,)).fetchone())
+    return dict(conn.execute('select id, workspace_id, lead_id, due_time, title, priority from tasks where id = ?', (task_id,)).fetchone())
 
 
 def complete_task(conn: sqlite3.Connection, task_id: int) -> dict | None:
@@ -568,7 +610,7 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/pipeline':
                 return self.write_json({'stages': fetch_pipeline(conn, params.get('workspace', ['ws-default'])[0])})
             if parsed.path == '/api/tasks':
-                return self.write_json(fetch_tasks(conn))
+                return self.write_json(fetch_tasks(conn, params.get('workspace', ['ws-default'])[0]))
             if parsed.path == '/api/analytics':
                 return self.write_json(fetch_analytics(conn, params.get('workspace', ['ws-default'])[0]))
             if parsed.path == '/api/stages':

@@ -62,8 +62,18 @@ class RevenueOSTestCase(unittest.TestCase):
     def test_create_and_complete_task(self):
         task = server.create_task(self.conn, {'title': 'Enviar proposta', 'priority': 'high', 'leadId': 'lead-1'})
         self.assertEqual(task['title'], 'Enviar proposta')
+        self.assertEqual(task['workspace_id'], 'ws-default')
         completed = server.complete_task(self.conn, task['id'])
         self.assertEqual(completed, {'id': task['id'], 'completed': True})
+
+    def test_tasks_are_isolated_by_workspace(self):
+        default_tasks = server.fetch_tasks(self.conn, workspace_id='ws-default')
+        clinic_tasks = server.fetch_tasks(self.conn, workspace_id='ws-clinics')
+        self.assertTrue(all(task['workspace_id'] == 'ws-default' for task in default_tasks['tasks']))
+        self.assertTrue(all(task['workspace_id'] == 'ws-clinics' for task in clinic_tasks['tasks']))
+        self.assertGreater(len(default_tasks['tasks']), 0)
+        self.assertGreater(len(clinic_tasks['tasks']), 0)
+        self.assertNotEqual(default_tasks['onboarding'], clinic_tasks['onboarding'])
 
     def test_create_and_fetch_note(self):
         note = server.create_note(self.conn, 'lead-1', {'author': 'Carla', 'body': 'Lead pediu validação de ROI.'})
