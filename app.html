@@ -11,7 +11,25 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body class="app-body">
-    <div class="app-shell">
+    <section id="auth-shell" class="auth-shell">
+      <div class="auth-card glass-card">
+        <span class="eyebrow">Revenue OS demo login</span>
+        <h1>Acesse seu workspace</h1>
+        <p>Use uma das credenciais demo para entrar no cockpit.</p>
+        <form id="login-form" class="lead-form auth-form">
+          <input name="email" type="email" placeholder="Email" required />
+          <input name="password" type="password" placeholder="Senha" required />
+          <button class="button button-primary button-block" type="submit">Entrar</button>
+        </form>
+        <p id="login-feedback" class="form-feedback"></p>
+        <div class="auth-hints">
+          <small><strong>Workspace default:</strong> carla@highticketlabs.com / demo123</small>
+          <small><strong>Workspace clinics:</strong> bruna@clinicsalesops.com / demo123</small>
+        </div>
+      </div>
+    </section>
+
+    <div id="app-shell" class="app-shell hidden">
       <aside class="sidebar glass-card">
         <div>
           <a class="brand" href="index.html">Revenue OS</a>
@@ -43,6 +61,7 @@
               <span>Buscar lead</span>
               <input id="lead-search" type="search" placeholder="Nome, empresa ou origem" />
             </label>
+            <button id="logout-button" class="button button-ghost" type="button">Sair</button>
             <a class="button button-ghost" href="index.html">Voltar ao site</a>
           </div>
         </header>

@@ -1,11 +1,17 @@
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
+const authTokenKey = 'revenue-os-demo-token'
 
-const state = { activeView: 'dashboard', workspaceId: 'ws-default', search: '', owner: 'all', temperature: 'all', status: 'all', selectedLeadId: null, leads: [], stages: [], team: [], workspaces: [] }
+const state = { activeView: 'dashboard', workspaceId: 'ws-default', search: '', owner: 'all', temperature: 'all', status: 'all', selectedLeadId: null, leads: [], stages: [], team: [], workspaces: [], user: null, authToken: localStorage.getItem(authTokenKey) || '' }
 const titleByView = { dashboard: 'Dashboard operacional', leads: 'Lead inbox', pipeline: 'Pipeline comercial', tasks: 'Tasks e follow-up', analytics: 'Analytics executivo' }
 
 const qs = (id) => document.querySelector(id)
+const authShell = qs('#auth-shell')
+const appShell = qs('#app-shell')
 const viewTitle = qs('#view-title')
 const navItems = [...document.querySelectorAll('.nav-item')]
+const loginForm = qs('#login-form')
+const loginFeedback = qs('#login-feedback')
+const logoutButton = qs('#logout-button')
 const searchInput = qs('#lead-search')
 const ownerFilter = qs('#owner-filter')
 const temperatureFilter = qs('#temperature-filter')
@@ -48,7 +54,9 @@ function withWorkspace(url) {
 }
 
 async function request(url, options = {}) {
-  const response = await fetch(withWorkspace(url), { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options })
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
+  if (state.authToken) headers.Authorization = `Bearer ${state.authToken}`
+  const response = await fetch(withWorkspace(url), { headers, ...options })
   const data = await response.json()
   if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`)
   return data
@@ -81,6 +89,26 @@ function renderFilters() {
   const statuses = ['all', 'novo', 'qualificado', 'ganho', 'perdido', 'etapa atualizada', 'proposta enviada']
   statusFilter.innerHTML = statuses.map((value) => `<option value="${value}">${value === 'all' ? 'Todos os status' : value}</option>`).join('')
   statusFilter.value = state.status
+}
+
+function setAuthenticated(isAuthenticated) {
+  authShell.classList.toggle('hidden', isAuthenticated)
+  appShell.classList.toggle('hidden', !isAuthenticated)
+}
+
+function applySession(session) {
+  state.user = session.user
+  state.workspaces = session.workspaces
+  state.workspaceId = session.workspaces[0]?.id || 'ws-default'
+  renderFilters()
+  setAuthenticated(true)
+}
+
+async function bootstrapSession() {
+  if (!state.authToken) { setAuthenticated(false); return false }
+  const session = await request('/api/auth/me')
+  applySession(session)
+  return true
 }
 
 async function loadWorkspaces() { state.workspaces = (await request('/api/workspaces')).items; renderFilters() }
@@ -119,9 +147,30 @@ const createNote = async (form) => { if (!state.selectedLeadId) throw new Error(
 const markLeadWon = async () => { if (!state.selectedLeadId) return; await request(`/api/leads/${state.selectedLeadId}/mark-won`, { method: 'POST', body: '{}' }); await refreshOperationalViews() }
 const markLeadLost = async () => { if (!state.selectedLeadId) return; const lostReason = window.prompt('Qual o motivo da perda?') || 'Sem motivo informado'; await request(`/api/leads/${state.selectedLeadId}/mark-lost`, { method: 'POST', body: JSON.stringify({ lostReason }) }); await refreshOperationalViews() }
 const inviteTeamMember = async (form) => { const payload = Object.fromEntries(new FormData(form).entries()); payload.workspaceId = state.workspaceId; const member = await request('/api/team', { method: 'POST', body: JSON.stringify(payload) }); await loadTeam(); form.reset(); teamFormFeedback.textContent = `Convite criado para ${member.name}.` }
+const login = async (form) => {
+  const payload = Object.fromEntries(new FormData(form).entries())
+  const session = await request('/api/auth/login', { method: 'POST', body: JSON.stringify(payload) })
+  state.authToken = session.token
+  localStorage.setItem(authTokenKey, session.token)
+  applySession(session)
+  await Promise.all([loadStages(), loadDashboard(), loadLeads(), loadPipeline(), loadTasks(), loadAnalytics(), loadTeam()])
+  if (state.selectedLeadId) await Promise.all([loadSummary(state.selectedLeadId), loadNotes(), loadTimeline()])
+  form.reset()
+  loginFeedback.textContent = ''
+}
+const logout = async () => {
+  if (state.authToken) await request('/api/auth/logout', { method: 'POST', body: '{}' })
+  state.authToken = ''
+  state.user = null
+  state.workspaces = []
+  localStorage.removeItem(authTokenKey)
+  setAuthenticated(false)
+}
 
 function attachEvents() {
   navItems.forEach((item) => item.addEventListener('click', () => setView(item.dataset.view)))
+  loginForm.addEventListener('submit', async (event) => { event.preventDefault(); try { await login(event.currentTarget) } catch (error) { loginFeedback.textContent = error.message } })
+  logoutButton.addEventListener('click', async () => { try { await logout() } catch (error) { loginFeedback.textContent = error.message } })
   workspaceSwitcher.addEventListener('change', async (event) => { state.workspaceId = event.target.value; state.selectedLeadId = null; state.owner = 'all'; state.temperature = 'all'; state.status = 'all'; await refreshOperationalViews() })
   searchInput.addEventListener('input', async (event) => { state.search = event.target.value; await loadLeads() })
   ownerFilter.addEventListener('change', async (event) => { state.owner = event.target.value; await loadLeads() })
@@ -143,13 +192,16 @@ function attachEvents() {
 }
 
 async function init() {
+  attachEvents()
   try {
+    const hasSession = await bootstrapSession()
+    if (!hasSession) return
     await Promise.all([loadWorkspaces(), loadStages(), loadTeam()])
     await Promise.all([loadDashboard(), loadLeads(), loadPipeline(), loadTasks(), loadAnalytics()])
     if (state.selectedLeadId) await Promise.all([loadSummary(state.selectedLeadId), loadNotes(), loadTimeline()])
-    attachEvents()
   } catch (error) {
-    aiSummary.innerHTML = `<div class="stack-item"><p>Falha ao carregar a demo: ${error.message}</p></div>`
+    setAuthenticated(false)
+    loginFeedback.textContent = 'Faça login com uma credencial demo para abrir o app.'
   }
 }
 

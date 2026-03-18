@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -12,6 +13,14 @@ ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / 'revenue_os.db'
 
 SEED_WORKSPACES = [('ws-default', 'High Ticket Labs'), ('ws-clinics', 'Clinic Sales Ops')]
+SEED_USERS = [
+    ('user-1', 'Carla', 'carla@highticketlabs.com', 'demo123'),
+    ('user-2', 'Bruna', 'bruna@clinicsalesops.com', 'demo123'),
+]
+SEED_MEMBERSHIPS = [
+    ('user-1', 'ws-default', 'admin'),
+    ('user-2', 'ws-clinics', 'admin'),
+]
 
 SEED_STAGES = [
     ('entry', 'Entrada', 1),
@@ -128,6 +137,10 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+
 def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -146,6 +159,26 @@ def init_db(db_path: Path = DB_PATH) -> None:
             create table if not exists workspaces (
                 id text primary key,
                 name text not null
+            );
+
+            create table if not exists users (
+                id text primary key,
+                name text not null,
+                email text not null unique,
+                password_hash text not null
+            );
+
+            create table if not exists workspace_memberships (
+                id integer primary key autoincrement,
+                user_id text not null references users(id),
+                workspace_id text not null references workspaces(id),
+                role text not null
+            );
+
+            create table if not exists sessions (
+                token text primary key,
+                user_id text not null references users(id),
+                created_at text not null
             );
 
             create table if not exists stages (
@@ -248,6 +281,14 @@ def seed_db(conn: sqlite3.Connection) -> None:
         return
 
     conn.executemany('insert into workspaces (id, name) values (?, ?)', SEED_WORKSPACES)
+    conn.executemany(
+        'insert into users (id, name, email, password_hash) values (?, ?, ?, ?)',
+        [(user_id, name, email, hash_password(password)) for user_id, name, email, password in SEED_USERS],
+    )
+    conn.executemany(
+        'insert into workspace_memberships (user_id, workspace_id, role) values (?, ?, ?)',
+        SEED_MEMBERSHIPS,
+    )
     conn.executemany('insert into stages (id, name, order_index) values (?, ?, ?)', SEED_STAGES)
     conn.executemany(
         '''
@@ -524,6 +565,64 @@ def fetch_timeline(conn: sqlite3.Connection, lead_id: str) -> list[dict]:
 def fetch_workspaces(conn: sqlite3.Connection) -> list[dict]:
     return [dict(row) for row in conn.execute('select id, name from workspaces order by id asc').fetchall()]
 
+
+def fetch_user_workspaces(conn: sqlite3.Connection, user_id: str) -> list[dict]:
+    rows = conn.execute(
+        '''
+        select workspaces.id, workspaces.name, workspace_memberships.role
+        from workspace_memberships
+        join workspaces on workspaces.id = workspace_memberships.workspace_id
+        where workspace_memberships.user_id = ?
+        order by workspaces.id asc
+        ''',
+        (user_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_session(conn: sqlite3.Connection, user_id: str) -> str:
+    token = uuid4().hex
+    conn.execute('insert into sessions (token, user_id, created_at) values (?, ?, ?)', (token, user_id, utc_now()))
+    conn.commit()
+    return token
+
+
+def authenticate(conn: sqlite3.Connection, email: str, password: str) -> dict | None:
+    user = conn.execute('select id, name, email, password_hash from users where lower(email) = lower(?)', (email,)).fetchone()
+    if not user or user['password_hash'] != hash_password(password):
+        return None
+    token = create_session(conn, user['id'])
+    workspaces = fetch_user_workspaces(conn, user['id'])
+    return {
+        'token': token,
+        'user': {'id': user['id'], 'name': user['name'], 'email': user['email']},
+        'workspaces': workspaces,
+    }
+
+
+def fetch_session(conn: sqlite3.Connection, token: str) -> dict | None:
+    row = conn.execute(
+        '''
+        select users.id, users.name, users.email
+        from sessions
+        join users on users.id = sessions.user_id
+        where sessions.token = ?
+        ''',
+        (token,),
+    ).fetchone()
+    if not row:
+        return None
+    workspaces = fetch_user_workspaces(conn, row['id'])
+    return {
+        'user': {'id': row['id'], 'name': row['name'], 'email': row['email']},
+        'workspaces': workspaces,
+    }
+
+
+def revoke_session(conn: sqlite3.Connection, token: str) -> None:
+    conn.execute('delete from sessions where token = ?', (token,))
+    conn.commit()
+
 def fetch_team(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> list[dict]:
     rows = conn.execute('select id, name, role from team_members where workspace_id = ? order by id asc', (workspace_id,)).fetchall()
     return [dict(row) for row in rows]
@@ -588,11 +687,23 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
         body = self.rfile.read(length) if length else b'{}'
         return json.loads(body.decode('utf-8'))
 
+    def read_bearer_token(self) -> str | None:
+        header = self.headers.get('Authorization', '')
+        if header.startswith('Bearer '):
+            return header.split(' ', 1)[1].strip()
+        return None
+
     def handle_api_get(self, parsed) -> None:
         params = parse_qs(parsed.query)
         with get_connection() as conn:
             if parsed.path == '/api/health':
                 return self.write_json({'status': 'ok'})
+            if parsed.path == '/api/auth/me':
+                token = self.read_bearer_token()
+                if not token:
+                    return self.write_json({'error': 'Unauthorized'}, status=401)
+                session = fetch_session(conn, token)
+                return self.write_json(session if session else {'error': 'Unauthorized'}, status=200 if session else 401)
             if parsed.path == '/api/dashboard':
                 return self.write_json(fetch_dashboard(conn, params.get('workspace', ['ws-default'])[0]))
             if parsed.path == '/api/leads':
@@ -618,12 +729,29 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/team':
                 return self.write_json({'items': fetch_team(conn, params.get('workspace', ['ws-default'])[0])})
             if parsed.path == '/api/workspaces':
+                token = self.read_bearer_token()
+                if token:
+                    session = fetch_session(conn, token)
+                    if not session:
+                        return self.write_json({'error': 'Unauthorized'}, status=401)
+                    return self.write_json({'items': session['workspaces']})
                 return self.write_json({'items': fetch_workspaces(conn)})
         self.write_json({'error': 'Not found'}, status=404)
 
     def handle_api_write(self, parsed, method: str) -> None:
         payload = self.read_json_body()
         with get_connection() as conn:
+            if method == 'POST' and parsed.path == '/api/auth/login':
+                if not payload.get('email') or not payload.get('password'):
+                    return self.write_json({'error': 'email and password are required'}, status=400)
+                session = authenticate(conn, payload['email'], payload['password'])
+                return self.write_json(session if session else {'error': 'Invalid credentials'}, status=200 if session else 401)
+            if method == 'POST' and parsed.path == '/api/auth/logout':
+                token = self.read_bearer_token()
+                if not token:
+                    return self.write_json({'error': 'Unauthorized'}, status=401)
+                revoke_session(conn, token)
+                return self.write_json({'ok': True})
             if method == 'POST' and parsed.path == '/api/leads':
                 if not payload.get('name'):
                     return self.write_json({'error': 'Missing fields: name'}, status=400)

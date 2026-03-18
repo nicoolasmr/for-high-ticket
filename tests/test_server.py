@@ -75,6 +75,15 @@ class RevenueOSTestCase(unittest.TestCase):
         self.assertGreater(len(clinic_tasks['tasks']), 0)
         self.assertNotEqual(default_tasks['onboarding'], clinic_tasks['onboarding'])
 
+    def test_authenticate_and_fetch_session(self):
+        session = server.authenticate(self.conn, 'carla@highticketlabs.com', 'demo123')
+        self.assertIsNotNone(session)
+        self.assertEqual(session['user']['name'], 'Carla')
+        self.assertEqual({workspace['id'] for workspace in session['workspaces']}, {'ws-default'})
+        fetched = server.fetch_session(self.conn, session['token'])
+        self.assertIsNotNone(fetched)
+        self.assertEqual(fetched['user']['email'], 'carla@highticketlabs.com')
+
     def test_create_and_fetch_note(self):
         note = server.create_note(self.conn, 'lead-1', {'author': 'Carla', 'body': 'Lead pediu validação de ROI.'})
         self.assertEqual(note['author'], 'Carla')
