@@ -57,6 +57,18 @@ class RevenueOSTestCase(unittest.TestCase):
         self.assertIsNotNone(lead)
         self.assertEqual(lead['stageId'], 'proposal')
 
+    def test_create_and_complete_task(self):
+        task = server.create_task(self.conn, {'title': 'Enviar proposta', 'priority': 'high', 'leadId': 'lead-1'})
+        self.assertEqual(task['title'], 'Enviar proposta')
+        completed = server.complete_task(self.conn, task['id'])
+        self.assertEqual(completed, {'id': task['id'], 'completed': True})
+
+    def test_create_and_fetch_note(self):
+        note = server.create_note(self.conn, 'lead-1', {'author': 'Carla', 'body': 'Lead pediu validação de ROI.'})
+        self.assertEqual(note['author'], 'Carla')
+        notes = server.fetch_notes(self.conn, 'lead-1')
+        self.assertTrue(any(item['body'] == 'Lead pediu validação de ROI.' for item in notes))
+
 
 if __name__ == '__main__':
     unittest.main()

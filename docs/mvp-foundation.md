@@ -2,28 +2,29 @@
 
 ## Evolução desta iteração
 
-O projeto saiu de uma demo consultiva para um MVP local já com duas operações centrais do produto:
+O projeto saiu de um MVP somente com leads para uma base operacional mais próxima do fluxo real:
 
 - criação manual de lead no app;
 - movimentação de lead entre etapas do pipeline;
-- API HTTP local para dashboard, leads, summary, pipeline, tasks, analytics e stages;
+- criação e conclusão de tasks de follow-up;
+- notas por lead com timeline básica no dashboard;
+- API HTTP local para dashboard, leads, summary, notes, pipeline, tasks, analytics e stages;
 - persistência SQLite com schema inicial e seed automática;
-- frontend desacoplado do mock local e consumindo endpoints reais;
-- testes unitários cobrindo seed, filtros, summary, dashboard e mutações do lead.
+- testes unitários cobrindo seed, filtros, summary, dashboard, mutações do lead, tasks e notas.
 
 ## O que isso valida melhor agora
 
-1. **Fluxo operacional real** de entrada e progressão do lead.
+1. **Fluxo operacional real** de entrada, progresso e acompanhamento do lead.
 2. **Contrato de dados** entre frontend e backend.
-3. **Estrutura de domínios centrais**: leads, stages, tasks e onboarding.
+3. **Estrutura de domínios centrais**: leads, stages, tasks, notes e onboarding.
 4. **Migração futura** para Next.js + Supabase com menos retrabalho no modelo.
 
 ## Próxima fase sugerida
 
 ### Produto
 - CRUD completo de leads
-- concluir task
-- registrar notas e timeline
+- registrar motivos de perda
+- timeline unificada com eventos
 - autenticação de workspace
 
 ### Plataforma

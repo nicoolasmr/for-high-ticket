@@ -28,11 +28,17 @@ const searchInput = document.querySelector('#lead-search')
 const ownerFilter = document.querySelector('#owner-filter')
 const temperatureFilter = document.querySelector('#temperature-filter')
 const leadForm = document.querySelector('#lead-form')
+const noteForm = document.querySelector('#note-form')
+const taskForm = document.querySelector('#task-form')
 const leadFormFeedback = document.querySelector('#lead-form-feedback')
+const noteFormFeedback = document.querySelector('#note-form-feedback')
+const taskFormFeedback = document.querySelector('#task-form-feedback')
+const completedCountPill = document.querySelector('#completed-count-pill')
 const kpiGrid = document.querySelector('#kpi-grid')
 const priorityList = document.querySelector('#priority-list')
 const priorityPill = document.querySelector('#priority-pill')
 const aiSummary = document.querySelector('#ai-summary')
+const notesList = document.querySelector('#notes-list')
 const leadsTableBody = document.querySelector('#leads-table-body')
 const pipelineBoard = document.querySelector('#pipeline-board')
 const taskList = document.querySelector('#task-list')
@@ -171,6 +177,24 @@ async function loadSummary(leadId) {
   `
 }
 
+async function loadNotes() {
+  if (!state.selectedLeadId) return
+  const payload = await request(`/api/leads/${state.selectedLeadId}/notes`)
+  notesList.innerHTML = payload.items
+    .map(
+      (note) => `
+        <div class="stack-item vertical-item">
+          <div>
+            <strong>${note.author}</strong>
+            <p>${note.body}</p>
+          </div>
+          <small>${new Date(note.created_at).toLocaleString('pt-BR')}</small>
+        </div>
+      `,
+    )
+    .join('')
+}
+
 async function loadPipeline() {
   const payload = await request('/api/pipeline')
   pipelineBoard.innerHTML = payload.stages
@@ -204,6 +228,7 @@ async function loadPipeline() {
 
 async function loadTasks() {
   const payload = await request('/api/tasks')
+  completedCountPill.textContent = `${payload.completedCount} concluídas`
   taskList.innerHTML = payload.tasks
     .map(
       (task) => `
@@ -211,8 +236,12 @@ async function loadTasks() {
           <div>
             <strong>${task.due_time}</strong>
             <p>${task.title}</p>
+            <small>${task.lead_id ? `Lead: ${task.lead_id}` : 'Sem lead vinculado'}</small>
           </div>
-          <span class="pill ${task.priority === 'urgent' ? 'pill-danger' : 'pill-neutral'}">${task.priority}</span>
+          <div class="task-actions">
+            <span class="pill ${task.priority === 'urgent' ? 'pill-danger' : 'pill-neutral'}">${task.priority}</span>
+            <button class="button button-ghost small-button" data-complete-task="${task.id}">Concluir</button>
+          </div>
         </div>
       `,
     )
@@ -264,31 +293,52 @@ async function loadAnalytics() {
 }
 
 async function refreshOperationalViews() {
-  await Promise.all([loadDashboard(), loadLeads(), loadPipeline(), loadAnalytics()])
-  if (state.selectedLeadId) await loadSummary(state.selectedLeadId)
+  await Promise.all([loadDashboard(), loadLeads(), loadPipeline(), loadTasks(), loadAnalytics()])
+  if (state.selectedLeadId) {
+    await loadSummary(state.selectedLeadId)
+    await loadNotes()
+  }
 }
 
 async function createLead(form) {
   const formData = new FormData(form)
   const payload = Object.fromEntries(formData.entries())
   payload.value = Number(payload.value || 0)
-  const lead = await request('/api/leads', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
+  const lead = await request('/api/leads', { method: 'POST', body: JSON.stringify(payload) })
   state.selectedLeadId = lead.id
   await refreshOperationalViews()
-  await loadSummary(lead.id)
   form.reset()
   leadFormFeedback.textContent = `Lead ${lead.name} criado com sucesso.`
 }
 
 async function moveLeadStage(leadId, stageId) {
-  await request(`/api/leads/${leadId}/stage`, {
-    method: 'PATCH',
-    body: JSON.stringify({ stageId }),
-  })
+  await request(`/api/leads/${leadId}/stage`, { method: 'PATCH', body: JSON.stringify({ stageId }) })
   await refreshOperationalViews()
+}
+
+async function createTask(form) {
+  const formData = new FormData(form)
+  const payload = Object.fromEntries(formData.entries())
+  const task = await request('/api/tasks', { method: 'POST', body: JSON.stringify(payload) })
+  await loadTasks()
+  form.reset()
+  taskFormFeedback.textContent = `Task ${task.title} criada com sucesso.`
+}
+
+async function completeTask(taskId) {
+  await request(`/api/tasks/${taskId}/complete`, { method: 'POST', body: '{}' })
+  await loadTasks()
+  await loadDashboard()
+}
+
+async function createNote(form) {
+  if (!state.selectedLeadId) throw new Error('Selecione um lead antes de registrar uma nota.')
+  const formData = new FormData(form)
+  const payload = Object.fromEntries(formData.entries())
+  await request(`/api/leads/${state.selectedLeadId}/notes`, { method: 'POST', body: JSON.stringify(payload) })
+  await loadNotes()
+  form.reset()
+  noteFormFeedback.textContent = 'Nota adicionada com sucesso.'
 }
 
 function attachEvents() {
@@ -314,12 +364,36 @@ function attachEvents() {
       leadFormFeedback.textContent = error.message
     }
   })
+  taskForm.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    try {
+      await createTask(event.currentTarget)
+    } catch (error) {
+      taskFormFeedback.textContent = error.message
+    }
+  })
+  noteForm.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    try {
+      await createNote(event.currentTarget)
+    } catch (error) {
+      noteFormFeedback.textContent = error.message
+    }
+  })
   document.body.addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-select-lead]')
-    if (!button) return
-    state.selectedLeadId = button.dataset.selectLead
-    await loadSummary(state.selectedLeadId)
-    setView('dashboard')
+    const leadButton = event.target.closest('[data-select-lead]')
+    if (leadButton) {
+      state.selectedLeadId = leadButton.dataset.selectLead
+      await loadSummary(state.selectedLeadId)
+      await loadNotes()
+      setView('dashboard')
+      return
+    }
+
+    const completeButton = event.target.closest('[data-complete-task]')
+    if (completeButton) {
+      await completeTask(completeButton.dataset.completeTask)
+    }
   })
   document.body.addEventListener('change', async (event) => {
     const select = event.target.closest('[data-stage-select]')
@@ -337,7 +411,10 @@ async function init() {
   try {
     await loadStages()
     await Promise.all([loadDashboard(), loadLeads(), loadPipeline(), loadTasks(), loadAnalytics()])
-    if (state.selectedLeadId) await loadSummary(state.selectedLeadId)
+    if (state.selectedLeadId) {
+      await loadSummary(state.selectedLeadId)
+      await loadNotes()
+    }
     attachEvents()
   } catch (error) {
     aiSummary.innerHTML = `<div class="stack-item"><p>Falha ao carregar a demo: ${error.message}</p></div>`

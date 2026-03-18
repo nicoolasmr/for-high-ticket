@@ -95,10 +95,10 @@ SEED_LEADS = [
 ]
 
 SEED_TASKS = [
-    ('14:00', 'Call de qualificação com Lucas Neri', 'high'),
-    ('16:30', 'Follow-up Ana Ribeiro com caso de uso', 'urgent'),
-    ('17:00', 'Confirmar call da Clínica Lumina', 'medium'),
-    ('18:00', 'Primeira resposta para Juliana Costa', 'high'),
+    ('lead-2', '14:00', 'Call de qualificação com Lucas Neri', 'high', 0),
+    ('lead-1', '16:30', 'Follow-up Ana Ribeiro com caso de uso', 'urgent', 0),
+    ('lead-3', '17:00', 'Confirmar call da Clínica Lumina', 'medium', 0),
+    ('lead-4', '18:00', 'Primeira resposta para Juliana Costa', 'high', 0),
 ]
 
 SEED_ONBOARDING = [
@@ -106,6 +106,11 @@ SEED_ONBOARDING = [
     ('Configurar pipeline padrão', 1),
     ('Importar leads iniciais', 0),
     ('Convidar time comercial', 0),
+]
+
+SEED_NOTES = [
+    ('lead-1', 'Carla', 'Lead pediu ROI e quer validar rapidez do onboarding.'),
+    ('lead-3', 'Carla', 'Gestor participa da próxima call para decisão final.'),
 ]
 
 
@@ -146,15 +151,25 @@ def init_db(db_path: Path = DB_PATH) -> None:
 
             create table if not exists tasks (
                 id integer primary key autoincrement,
+                lead_id text references leads(id),
                 due_time text not null,
                 title text not null,
-                priority text not null
+                priority text not null,
+                completed integer not null default 0
             );
 
             create table if not exists onboarding_steps (
                 id integer primary key autoincrement,
                 title text not null,
                 done integer not null
+            );
+
+            create table if not exists notes (
+                id integer primary key autoincrement,
+                lead_id text not null references leads(id),
+                author text not null,
+                body text not null,
+                created_at text not null
             );
             '''
         )
@@ -197,8 +212,12 @@ def seed_db(conn: sqlite3.Connection) -> None:
             for lead in SEED_LEADS
         ],
     )
-    conn.executemany('insert into tasks (due_time, title, priority) values (?, ?, ?)', SEED_TASKS)
+    conn.executemany('insert into tasks (lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?)', SEED_TASKS)
     conn.executemany('insert into onboarding_steps (title, done) values (?, ?)', SEED_ONBOARDING)
+    conn.executemany(
+        'insert into notes (lead_id, author, body, created_at) values (?, ?, ?, ?)',
+        [(lead_id, author, body, datetime.now(timezone.utc).isoformat()) for lead_id, author, body in SEED_NOTES],
+    )
     conn.commit()
 
 
@@ -258,12 +277,10 @@ def fetch_dashboard(conn: sqlite3.Connection) -> dict:
     hot_leads = conn.execute("select count(*) as count from leads where temperature = 'hot'").fetchone()['count']
     risky = conn.execute('select count(*) as count from leads where last_reply_hours >= 18').fetchone()['count']
     revenue = conn.execute('select coalesce(sum(value), 0) as total from leads').fetchone()['total']
-    priority_tasks = conn.execute("select count(*) as count from tasks where priority in ('urgent', 'high')").fetchone()['count']
-
+    priority_tasks = conn.execute("select count(*) as count from tasks where priority in ('urgent', 'high') and completed = 0").fetchone()['count']
     priorities = conn.execute(
         'select id, name, company, owner, last_reply_hours from leads order by last_reply_hours desc, value desc limit 3'
     ).fetchall()
-
     return {
         'kpis': [
             {'label': 'Leads no pipeline', 'value': total_leads, 'detail': f'{hot_leads} quentes'},
@@ -292,22 +309,20 @@ def fetch_pipeline(conn: sqlite3.Connection) -> list[dict]:
         leads = conn.execute(
             'select id, name, company, owner, value from leads where stage_id = ? order by value desc', (stage['id'],)
         ).fetchall()
-        payload.append(
-            {
-                'id': stage['id'],
-                'name': stage['name'],
-                'leads': [dict(row) for row in leads],
-            }
-        )
+        payload.append({'id': stage['id'], 'name': stage['name'], 'leads': [dict(row) for row in leads]})
     return payload
 
 
 def fetch_tasks(conn: sqlite3.Connection) -> dict:
-    tasks = conn.execute('select due_time, title, priority from tasks order by due_time asc').fetchall()
+    tasks = conn.execute(
+        'select id, lead_id, due_time, title, priority from tasks where completed = 0 order by due_time asc'
+    ).fetchall()
     onboarding = conn.execute('select title, done from onboarding_steps order by id asc').fetchall()
+    completed_count = conn.execute('select count(*) as count from tasks where completed = 1').fetchone()['count']
     return {
         'tasks': [dict(row) for row in tasks],
         'onboarding': [{'title': row['title'], 'done': bool(row['done'])} for row in onboarding],
+        'completedCount': completed_count,
     }
 
 
@@ -349,8 +364,9 @@ def create_lead(conn: sqlite3.Connection, payload: dict) -> dict:
 
 
 def update_lead_stage(conn: sqlite3.Connection, lead_id: str, stage_id: str) -> dict | None:
+    before = conn.total_changes
     conn.execute('update leads set stage_id = ?, status = ? where id = ?', (stage_id, 'Etapa atualizada', lead_id))
-    if conn.total_changes == 0:
+    if conn.total_changes == before:
         return None
     conn.commit()
     row = conn.execute(
@@ -365,6 +381,49 @@ def fetch_stages(conn: sqlite3.Connection) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def fetch_notes(conn: sqlite3.Connection, lead_id: str) -> list[dict]:
+    rows = conn.execute(
+        'select id, author, body, created_at from notes where lead_id = ? order by id desc',
+        (lead_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_note(conn: sqlite3.Connection, lead_id: str, payload: dict) -> dict:
+    created_at = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        'insert into notes (lead_id, author, body, created_at) values (?, ?, ?, ?)',
+        (lead_id, payload.get('author', 'Equipe'), payload['body'], created_at),
+    )
+    conn.commit()
+    row = conn.execute('select id, author, body, created_at from notes where rowid = last_insert_rowid()').fetchone()
+    return dict(row)
+
+
+def create_task(conn: sqlite3.Connection, payload: dict) -> dict:
+    conn.execute(
+        'insert into tasks (lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, 0)',
+        (
+            payload.get('leadId'),
+            payload.get('dueTime', 'Hoje, 17:00'),
+            payload['title'],
+            payload.get('priority', 'medium'),
+        ),
+    )
+    conn.commit()
+    row = conn.execute('select id, lead_id, due_time, title, priority from tasks where rowid = last_insert_rowid()').fetchone()
+    return dict(row)
+
+
+def complete_task(conn: sqlite3.Connection, task_id: int) -> dict | None:
+    before = conn.total_changes
+    conn.execute('update tasks set completed = 1 where id = ?', (task_id,))
+    if conn.total_changes == before:
+        return None
+    conn.commit()
+    return {'id': task_id, 'completed': True}
+
+
 def fetch_analytics(conn: sqlite3.Connection) -> dict:
     sources = conn.execute('select source, count(*) as count, sum(value) as revenue from leads group by source order by revenue desc').fetchall()
     insights = [
@@ -373,27 +432,10 @@ def fetch_analytics(conn: sqlite3.Connection) -> dict:
         'Indicação converte melhor que Instagram nesta semana.',
         '11 leads estão sem resposta há mais de 24 horas.',
     ]
-    return {
-        'insights': insights,
-        'sources': [dict(row) for row in sources],
-    }
+    return {'insights': insights, 'sources': [dict(row) for row in sources]}
 
 
 class RevenueOSHandler(SimpleHTTPRequestHandler):
-    def do_POST(self) -> None:
-        parsed = urlparse(self.path)
-        if not parsed.path.startswith('/api/'):
-            self.write_json({'error': 'Not found'}, status=404)
-            return
-        self.handle_api_write(parsed, method='POST')
-
-    def do_PATCH(self) -> None:
-        parsed = urlparse(self.path)
-        if not parsed.path.startswith('/api/'):
-            self.write_json({'error': 'Not found'}, status=404)
-            return
-        self.handle_api_write(parsed, method='PATCH')
-
     def __init__(self, *args, directory: str | None = None, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
@@ -408,6 +450,20 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
             self.path = '/index.html'
         super().do_GET()
 
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith('/api/'):
+            self.write_json({'error': 'Not found'}, status=404)
+            return
+        self.handle_api_write(parsed, method='POST')
+
+    def do_PATCH(self) -> None:
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith('/api/'):
+            self.write_json({'error': 'Not found'}, status=404)
+            return
+        self.handle_api_write(parsed, method='PATCH')
+
     def read_json_body(self) -> dict:
         length = int(self.headers.get('Content-Length', '0'))
         body = self.rfile.read(length) if length else b'{}'
@@ -421,19 +477,25 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/dashboard':
                 return self.write_json(fetch_dashboard(conn))
             if parsed.path == '/api/leads':
-                payload = fetch_leads(
-                    conn,
-                    search=params.get('search', [''])[0],
-                    owner=params.get('owner', ['all'])[0],
-                    temperature=params.get('temperature', ['all'])[0],
+                return self.write_json(
+                    {
+                        'items': fetch_leads(
+                            conn,
+                            search=params.get('search', [''])[0],
+                            owner=params.get('owner', ['all'])[0],
+                            temperature=params.get('temperature', ['all'])[0],
+                        )
+                    }
                 )
-                return self.write_json({'items': payload})
             if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/summary'):
                 lead_id = parsed.path.split('/')[3]
                 summary = fetch_summary(conn, lead_id)
                 if summary is None:
                     return self.write_json({'error': 'Lead not found'}, status=404)
                 return self.write_json(summary)
+            if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/notes'):
+                lead_id = parsed.path.split('/')[3]
+                return self.write_json({'items': fetch_notes(conn, lead_id)})
             if parsed.path == '/api/pipeline':
                 return self.write_json({'stages': fetch_pipeline(conn)})
             if parsed.path == '/api/tasks':
@@ -448,12 +510,9 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
         payload = self.read_json_body()
         with get_connection() as conn:
             if method == 'POST' and parsed.path == '/api/leads':
-                required = ['name']
-                missing = [field for field in required if not payload.get(field)]
-                if missing:
-                    return self.write_json({'error': 'Missing fields: ' + ', '.join(missing)}, status=400)
-                lead = create_lead(conn, payload)
-                return self.write_json(lead, status=201)
+                if not payload.get('name'):
+                    return self.write_json({'error': 'Missing fields: name'}, status=400)
+                return self.write_json(create_lead(conn, payload), status=201)
             if method == 'PATCH' and parsed.path.startswith('/api/leads/') and parsed.path.endswith('/stage'):
                 lead_id = parsed.path.split('/')[3]
                 if not payload.get('stageId'):
@@ -462,6 +521,21 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                 if lead is None:
                     return self.write_json({'error': 'Lead not found'}, status=404)
                 return self.write_json(lead)
+            if method == 'POST' and parsed.path.startswith('/api/leads/') and parsed.path.endswith('/notes'):
+                lead_id = parsed.path.split('/')[3]
+                if not payload.get('body'):
+                    return self.write_json({'error': 'body is required'}, status=400)
+                return self.write_json(create_note(conn, lead_id, payload), status=201)
+            if method == 'POST' and parsed.path == '/api/tasks':
+                if not payload.get('title'):
+                    return self.write_json({'error': 'title is required'}, status=400)
+                return self.write_json(create_task(conn, payload), status=201)
+            if method == 'POST' and parsed.path.startswith('/api/tasks/') and parsed.path.endswith('/complete'):
+                task_id = int(parsed.path.split('/')[3])
+                task = complete_task(conn, task_id)
+                if task is None:
+                    return self.write_json({'error': 'Task not found'}, status=404)
+                return self.write_json(task)
         self.write_json({'error': 'Not found'}, status=404)
 
     def write_json(self, payload: dict, status: int = 200) -> None:
