@@ -101,6 +101,12 @@ SEED_TASKS = [
     ('lead-4', '18:00', 'Primeira resposta para Juliana Costa', 'high', 0),
 ]
 
+SEED_TEAM = [
+    ('Carla', 'manager'),
+    ('Marcos', 'rep'),
+    ('Rafa', 'rep'),
+]
+
 SEED_ONBOARDING = [
     ('Definir nome do workspace', 1),
     ('Configurar pipeline padrão', 1),
@@ -161,6 +167,12 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 title text not null,
                 priority text not null,
                 completed integer not null default 0
+            );
+
+            create table if not exists team_members (
+                id integer primary key autoincrement,
+                name text not null,
+                role text not null
             );
 
             create table if not exists onboarding_steps (
@@ -233,6 +245,7 @@ def seed_db(conn: sqlite3.Connection) -> None:
             for lead in SEED_LEADS
         ],
     )
+    conn.executemany('insert into team_members (name, role) values (?, ?)', SEED_TEAM)
     conn.executemany('insert into tasks (lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?)', SEED_TASKS)
     conn.executemany('insert into onboarding_steps (title, done) values (?, ?)', SEED_ONBOARDING)
     for lead_id, author, body in SEED_NOTES:
@@ -243,7 +256,7 @@ def seed_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def fetch_leads(conn: sqlite3.Connection, search: str = '', owner: str = 'all', temperature: str = 'all') -> list[dict]:
+def fetch_leads(conn: sqlite3.Connection, search: str = '', owner: str = 'all', temperature: str = 'all', status: str = 'all') -> list[dict]:
     query = '''
         select leads.*, stages.name as stage_name
         from leads
@@ -251,9 +264,10 @@ def fetch_leads(conn: sqlite3.Connection, search: str = '', owner: str = 'all', 
         where (? = '' or lower(leads.name || ' ' || leads.company || ' ' || leads.source) like '%' || lower(?) || '%')
           and (? = 'all' or leads.owner = ?)
           and (? = 'all' or leads.temperature = ?)
+          and (? = 'all' or lower(leads.status) like '%' || lower(?) || '%')
         order by leads.last_reply_hours desc, leads.value desc
     '''
-    rows = conn.execute(query, (search, search, owner, owner, temperature, temperature)).fetchall()
+    rows = conn.execute(query, (search, search, owner, owner, temperature, temperature, status, status)).fetchall()
     return [serialize_lead(row) for row in rows]
 
 
@@ -444,6 +458,19 @@ def fetch_timeline(conn: sqlite3.Connection, lead_id: str) -> list[dict]:
     return [{'id': row['id'], 'eventType': row['event_type'], 'payload': json.loads(row['payload_json']), 'createdAt': row['created_at']} for row in rows]
 
 
+
+
+def fetch_team(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute('select id, name, role from team_members order by id asc').fetchall()
+    return [dict(row) for row in rows]
+
+
+def invite_team_member(conn: sqlite3.Connection, payload: dict) -> dict:
+    cursor = conn.execute('insert into team_members (name, role) values (?, ?)', (payload['name'], payload.get('role', 'rep')))
+    member_id = cursor.lastrowid
+    conn.commit()
+    return dict(conn.execute('select id, name, role from team_members where id = ?', (member_id,)).fetchone())
+
 def fetch_analytics(conn: sqlite3.Connection) -> dict:
     sources = conn.execute('select source, count(*) as count, sum(value) as revenue from leads group by source order by revenue desc').fetchall()
     insights = [
@@ -497,7 +524,7 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/dashboard':
                 return self.write_json(fetch_dashboard(conn))
             if parsed.path == '/api/leads':
-                return self.write_json({'items': fetch_leads(conn, search=params.get('search', [''])[0], owner=params.get('owner', ['all'])[0], temperature=params.get('temperature', ['all'])[0])})
+                return self.write_json({'items': fetch_leads(conn, search=params.get('search', [''])[0], owner=params.get('owner', ['all'])[0], temperature=params.get('temperature', ['all'])[0], status=params.get('status', ['all'])[0])})
             if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/summary'):
                 lead_id = parsed.path.split('/')[3]
                 summary = fetch_summary(conn, lead_id)
@@ -516,6 +543,8 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                 return self.write_json(fetch_analytics(conn))
             if parsed.path == '/api/stages':
                 return self.write_json({'items': fetch_stages(conn)})
+            if parsed.path == '/api/team':
+                return self.write_json({'items': fetch_team(conn)})
         self.write_json({'error': 'Not found'}, status=404)
 
     def handle_api_write(self, parsed, method: str) -> None:
@@ -544,6 +573,10 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                 lead_id = parsed.path.split('/')[3]
                 lead = mark_lead_status(conn, lead_id, 'Perdido', payload.get('lostReason'))
                 return self.write_json(lead if lead else {'error': 'Lead not found'}, status=200 if lead else 404)
+            if method == 'POST' and parsed.path == '/api/team':
+                if not payload.get('name'):
+                    return self.write_json({'error': 'name is required'}, status=400)
+                return self.write_json(invite_team_member(conn, payload), status=201)
             if method == 'POST' and parsed.path == '/api/tasks':
                 if not payload.get('title'):
                     return self.write_json({'error': 'title is required'}, status=400)

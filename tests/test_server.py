@@ -22,9 +22,9 @@ class RevenueOSTestCase(unittest.TestCase):
         self.assertEqual(leads[0]['id'], 'lead-1')
 
     def test_filters_work(self):
-        leads = server.fetch_leads(self.conn, owner='Carla', temperature='hot')
+        leads = server.fetch_leads(self.conn, owner='Carla', temperature='hot', status='proposta')
         ids = {lead['id'] for lead in leads}
-        self.assertEqual(ids, {'lead-1', 'lead-3'})
+        self.assertEqual(ids, {'lead-3'})
 
     def test_summary_exists(self):
         summary = server.fetch_summary(self.conn, 'lead-1')
@@ -69,6 +69,12 @@ class RevenueOSTestCase(unittest.TestCase):
         server.create_note(self.conn, 'lead-1', {'author': 'Carla', 'body': 'Nova nota de timeline'})
         timeline = server.fetch_timeline(self.conn, 'lead-1')
         self.assertTrue(any(item['eventType'] == 'note_added' for item in timeline))
+
+    def test_team_invite(self):
+        member = server.invite_team_member(self.conn, {'name': 'Bia', 'role': 'rep'})
+        self.assertEqual(member['name'], 'Bia')
+        team = server.fetch_team(self.conn)
+        self.assertTrue(any(item['name'] == 'Bia' for item in team))
 
 
 if __name__ == '__main__':

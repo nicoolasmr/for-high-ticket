@@ -1,6 +1,6 @@
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
-const state = { activeView: 'dashboard', search: '', owner: 'all', temperature: 'all', selectedLeadId: null, leads: [], stages: [] }
+const state = { activeView: 'dashboard', search: '', owner: 'all', temperature: 'all', status: 'all', selectedLeadId: null, leads: [], stages: [], team: [] }
 const titleByView = { dashboard: 'Dashboard operacional', leads: 'Lead inbox', pipeline: 'Pipeline comercial', tasks: 'Tasks e follow-up', analytics: 'Analytics executivo' }
 
 const viewTitle = document.querySelector('#view-title')
@@ -8,14 +8,18 @@ const navItems = [...document.querySelectorAll('.nav-item')]
 const searchInput = document.querySelector('#lead-search')
 const ownerFilter = document.querySelector('#owner-filter')
 const temperatureFilter = document.querySelector('#temperature-filter')
+const statusFilter = document.querySelector('#status-filter')
+const leadOwnerInput = document.querySelector('#lead-owner')
 const leadForm = document.querySelector('#lead-form')
 const noteForm = document.querySelector('#note-form')
 const taskForm = document.querySelector('#task-form')
+const teamForm = document.querySelector('#team-form')
 const markWonButton = document.querySelector('#mark-won-button')
 const markLostButton = document.querySelector('#mark-lost-button')
 const leadFormFeedback = document.querySelector('#lead-form-feedback')
 const noteFormFeedback = document.querySelector('#note-form-feedback')
 const taskFormFeedback = document.querySelector('#task-form-feedback')
+const teamFormFeedback = document.querySelector('#team-form-feedback')
 const completedCountPill = document.querySelector('#completed-count-pill')
 const kpiGrid = document.querySelector('#kpi-grid')
 const priorityList = document.querySelector('#priority-list')
@@ -23,6 +27,7 @@ const priorityPill = document.querySelector('#priority-pill')
 const aiSummary = document.querySelector('#ai-summary')
 const timelineList = document.querySelector('#timeline-list')
 const notesList = document.querySelector('#notes-list')
+const teamList = document.querySelector('#team-list')
 const leadsTableBody = document.querySelector('#leads-table-body')
 const pipelineBoard = document.querySelector('#pipeline-board')
 const taskList = document.querySelector('#task-list')
@@ -47,16 +52,25 @@ function setView(view) {
 }
 
 function renderFilters() {
-  const owners = ['all', ...new Set(state.leads.map((lead) => lead.owner))]
+  const owners = ['all', ...new Set(state.team.map((member) => member.name))]
   ownerFilter.innerHTML = owners.map((owner) => `<option value="${owner}">${owner === 'all' ? 'Todos os owners' : owner}</option>`).join('')
   ownerFilter.value = state.owner
+  leadOwnerInput.innerHTML = ['<option value="">Sem owner</option>', ...state.team.map((member) => `<option value="${member.name}">${member.name}</option>`)].join('')
+
   const temperatures = ['all', 'hot', 'warm', 'cold']
   temperatureFilter.innerHTML = temperatures.map((value) => `<option value="${value}">${value === 'all' ? 'Todas as temperaturas' : value}</option>`).join('')
   temperatureFilter.value = state.temperature
+
+  const statuses = ['all', 'novo', 'qualificado', 'ganho', 'perdido', 'etapa atualizada', 'proposta enviada']
+  statusFilter.innerHTML = statuses.map((value) => `<option value="${value}">${value === 'all' ? 'Todos os status' : value}</option>`).join('')
+  statusFilter.value = state.status
 }
 
-async function loadStages() {
-  state.stages = (await request('/api/stages')).items
+async function loadStages() { state.stages = (await request('/api/stages')).items }
+async function loadTeam() {
+  state.team = (await request('/api/team')).items
+  teamList.innerHTML = state.team.map((member) => `<div class="stack-item"><div><strong>${member.name}</strong><p>${member.role}</p></div></div>`).join('')
+  renderFilters()
 }
 
 async function loadDashboard() {
@@ -67,11 +81,10 @@ async function loadDashboard() {
 }
 
 async function loadLeads() {
-  const params = new URLSearchParams({ search: state.search, owner: state.owner, temperature: state.temperature })
+  const params = new URLSearchParams({ search: state.search, owner: state.owner, temperature: state.temperature, status: state.status })
   const payload = await request(`/api/leads?${params.toString()}`)
   state.leads = payload.items
   if (!state.selectedLeadId && state.leads[0]) state.selectedLeadId = state.leads[0].id
-  renderFilters()
   leadsTableBody.innerHTML = state.leads.map((lead) => `<tr><td><button class="table-lead-button" data-select-lead="${lead.id}"><strong>${lead.name}</strong><div class="table-sub">${lead.company} · ${lead.source}</div></button></td><td><select class="stage-select" data-stage-select="${lead.id}">${stageOptions(lead.stageId)}</select></td><td>${lead.owner}</td><td><span class="temp temp-${lead.temperature}">${lead.temperature}</span></td><td>${lead.nextAction}</td><td>${currency.format(lead.value)}</td><td>${lead.status}${lead.lostReason ? `<div class="table-sub">${lead.lostReason}</div>` : ''}</td></tr>`).join('')
 }
 
@@ -116,31 +129,25 @@ async function refreshOperationalViews() {
   if (state.selectedLeadId) await Promise.all([loadSummary(state.selectedLeadId), loadNotes(), loadTimeline()])
 }
 
-async function createLead(form) {
-  const payload = Object.fromEntries(new FormData(form).entries())
-  payload.value = Number(payload.value || 0)
-  const lead = await request('/api/leads', { method: 'POST', body: JSON.stringify(payload) })
-  state.selectedLeadId = lead.id
-  await refreshOperationalViews()
-  form.reset()
-  leadFormFeedback.textContent = `Lead ${lead.name} criado com sucesso.`
-}
-
+const createLead = async (form) => { const payload = Object.fromEntries(new FormData(form).entries()); payload.value = Number(payload.value || 0); const lead = await request('/api/leads', { method: 'POST', body: JSON.stringify(payload) }); state.selectedLeadId = lead.id; await refreshOperationalViews(); form.reset(); leadFormFeedback.textContent = `Lead ${lead.name} criado com sucesso.` }
 const moveLeadStage = async (leadId, stageId) => { await request(`/api/leads/${leadId}/stage`, { method: 'PATCH', body: JSON.stringify({ stageId }) }); await refreshOperationalViews() }
 const createTask = async (form) => { const task = await request('/api/tasks', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form).entries())) }); await loadTasks(); form.reset(); taskFormFeedback.textContent = `Task ${task.title} criada com sucesso.` }
 const completeTask = async (taskId) => { await request(`/api/tasks/${taskId}/complete`, { method: 'POST', body: '{}' }); await loadTasks(); await loadDashboard(); await loadTimeline() }
 const createNote = async (form) => { if (!state.selectedLeadId) throw new Error('Selecione um lead antes de registrar uma nota.'); await request(`/api/leads/${state.selectedLeadId}/notes`, { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form).entries())) }); await Promise.all([loadNotes(), loadTimeline()]); form.reset(); noteFormFeedback.textContent = 'Nota adicionada com sucesso.' }
 const markLeadWon = async () => { if (!state.selectedLeadId) return; await request(`/api/leads/${state.selectedLeadId}/mark-won`, { method: 'POST', body: '{}' }); await refreshOperationalViews() }
 const markLeadLost = async () => { if (!state.selectedLeadId) return; const lostReason = window.prompt('Qual o motivo da perda?') || 'Sem motivo informado'; await request(`/api/leads/${state.selectedLeadId}/mark-lost`, { method: 'POST', body: JSON.stringify({ lostReason }) }); await refreshOperationalViews() }
+const inviteTeamMember = async (form) => { const member = await request('/api/team', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form).entries())) }); await loadTeam(); form.reset(); teamFormFeedback.textContent = `Convite criado para ${member.name}.` }
 
 function attachEvents() {
   navItems.forEach((item) => item.addEventListener('click', () => setView(item.dataset.view)))
   searchInput.addEventListener('input', async (event) => { state.search = event.target.value; await loadLeads() })
   ownerFilter.addEventListener('change', async (event) => { state.owner = event.target.value; await loadLeads() })
   temperatureFilter.addEventListener('change', async (event) => { state.temperature = event.target.value; await loadLeads() })
+  statusFilter.addEventListener('change', async (event) => { state.status = event.target.value; await loadLeads() })
   leadForm.addEventListener('submit', async (event) => { event.preventDefault(); try { await createLead(event.currentTarget); setView('leads') } catch (error) { leadFormFeedback.textContent = error.message } })
   taskForm.addEventListener('submit', async (event) => { event.preventDefault(); try { await createTask(event.currentTarget) } catch (error) { taskFormFeedback.textContent = error.message } })
   noteForm.addEventListener('submit', async (event) => { event.preventDefault(); try { await createNote(event.currentTarget) } catch (error) { noteFormFeedback.textContent = error.message } })
+  teamForm.addEventListener('submit', async (event) => { event.preventDefault(); try { await inviteTeamMember(event.currentTarget) } catch (error) { teamFormFeedback.textContent = error.message } })
   markWonButton.addEventListener('click', markLeadWon)
   markLostButton.addEventListener('click', markLeadLost)
   document.body.addEventListener('click', async (event) => {
@@ -154,7 +161,7 @@ function attachEvents() {
 
 async function init() {
   try {
-    await loadStages()
+    await Promise.all([loadStages(), loadTeam()])
     await Promise.all([loadDashboard(), loadLeads(), loadPipeline(), loadTasks(), loadAnalytics()])
     if (state.selectedLeadId) await Promise.all([loadSummary(state.selectedLeadId), loadNotes(), loadTimeline()])
     attachEvents()

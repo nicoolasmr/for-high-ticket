@@ -105,7 +105,7 @@
               <form id="lead-form" class="lead-form">
                 <input name="name" type="text" placeholder="Nome do lead" required />
                 <input name="company" type="text" placeholder="Empresa" />
-                <input name="owner" type="text" placeholder="Owner" />
+                <select id="lead-owner" name="owner"></select>
                 <input name="source" type="text" placeholder="Origem" />
                 <input name="value" type="number" min="0" placeholder="Valor estimado" />
                 <select name="temperature">
@@ -124,6 +124,7 @@
                 <div class="filter-row">
                   <select id="owner-filter" aria-label="Filtrar por owner"></select>
                   <select id="temperature-filter" aria-label="Filtrar por temperatura"></select>
+                  <select id="status-filter" aria-label="Filtrar por status"></select>
                 </div>
               </div>
               <div class="table-wrap">
@@ -163,7 +164,18 @@
           </div>
         </section>
 
-        <section class="view-stack hidden" id="analytics-view"><div class="dashboard-grid analytics-grid"><section class="glass-card"><div class="section-header"><div><span class="label">Insights</span><h2>Leituras automáticas</h2></div></div><div id="insights-list" class="stack-list"></div></section><section class="glass-card"><div class="section-header"><div><span class="label">Receita</span><h2>Resumo por origem</h2></div></div><div id="source-performance" class="stack-list"></div></section></div></section>
+        <section class="view-stack hidden" id="analytics-view"><div class="dashboard-grid analytics-grid"><section class="glass-card"><div class="section-header"><div><span class="label">Insights</span><h2>Leituras automáticas</h2></div></div><div id="insights-list" class="stack-list"></div></section><section class="glass-card"><div class="section-header"><div><span class="label">Receita</span><h2>Resumo por origem</h2></div></div><div id="source-performance" class="stack-list"></div></section>
+            <section class="glass-card">
+              <div class="section-header"><div><span class="label">Time</span><h2>Convites e ownership</h2></div></div>
+              <form id="team-form" class="lead-form compact-form">
+                <input name="name" type="text" placeholder="Nome do membro" required />
+                <select name="role"><option value="rep">rep</option><option value="manager">manager</option><option value="admin">admin</option></select>
+                <button class="button button-ghost" type="submit">Convidar membro</button>
+              </form>
+              <p id="team-form-feedback" class="form-feedback"></p>
+              <div id="team-list" class="stack-list"></div>
+            </section>
+</div></section>
       </main>
     </div>
     <script src="app.js"></script>
