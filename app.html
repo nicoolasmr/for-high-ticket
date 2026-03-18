@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Revenue OS App | Dashboard MVP</title>
+    <meta name="description" content="Demo operacional do Revenue OS para times high ticket." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="app-body">
+    <div class="app-layout">
+      <aside class="app-sidebar">
+        <a class="brand" href="index.html">Revenue OS</a>
+        <nav class="sidebar-nav">
+          <a class="active" href="#dashboard">Dashboard</a>
+          <a href="#leads">Leads</a>
+          <a href="#pipeline">Pipeline</a>
+          <a href="#tasks">Tasks</a>
+          <a href="#analytics">Analytics</a>
+          <a href="#settings">Settings</a>
+        </nav>
+        <div class="workspace-card">
+          <p>Workspace</p>
+          <strong>High Ticket Labs</strong>
+          <span>Growth plan</span>
+        </div>
+      </aside>
+
+      <main class="app-main">
+        <section class="app-topbar">
+          <div>
+            <p class="eyebrow">Dashboard principal</p>
+            <h1>Saúde comercial em tempo real</h1>
+          </div>
+          <div class="topbar-actions">
+            <a class="secondary-button" href="index.html">Ver marketing site</a>
+            <button class="primary-button" type="button">Criar lead</button>
+          </div>
+        </section>
+
+        <section class="kpi-grid" id="dashboard">
+          <article class="panel">
+            <p>Leads novos hoje</p>
+            <strong>42</strong>
+            <span>12 do Instagram, 18 de indicação</span>
+          </article>
+          <article class="panel danger-panel">
+            <p>Sem resposta há 24h</p>
+            <strong>11</strong>
+            <span>4 em Negociação</span>
+          </article>
+          <article class="panel">
+            <p>Follow-ups vencidos</p>
+            <strong>9</strong>
+            <span>3 urgentes para hoje</span>
+          </article>
+          <article class="panel success-panel">
+            <p>Receita prevista</p>
+            <strong>R$ 186.000</strong>
+            <span>Próximos 30 dias</span>
+          </article>
+        </section>
+
+        <section class="content-grid" id="leads">
+          <article class="panel wide-panel">
+            <div class="section-row">
+              <div>
+                <p class="eyebrow">Lead Inbox</p>
+                <h2>Prioridade do dia</h2>
+              </div>
+              <span class="pill">3 quentes em risco</span>
+            </div>
+            <div class="table-shell">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Lead</th>
+                    <th>Etapa</th>
+                    <th>Owner</th>
+                    <th>Temperatura</th>
+                    <th>Próxima ação</th>
+                    <th>Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Ana Ribeiro</td>
+                    <td>Negociação</td>
+                    <td>Carla</td>
+                    <td><span class="temp hot">Hot</span></td>
+                    <td>Hoje, 16:30</td>
+                    <td>R$ 18.000</td>
+                  </tr>
+                  <tr>
+                    <td>Lucas Neri</td>
+                    <td>Qualificado</td>
+                    <td>Marcos</td>
+                    <td><span class="temp warm">Warm</span></td>
+                    <td>Hoje, 14:00</td>
+                    <td>R$ 7.500</td>
+                  </tr>
+                  <tr>
+                    <td>Clínica Lumina</td>
+                    <td>Proposta</td>
+                    <td>Carla</td>
+                    <td><span class="temp hot">Hot</span></td>
+                    <td>Amanhã</td>
+                    <td>R$ 32.000</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel stack-panel">
+            <div class="section-row">
+              <div>
+                <p class="eyebrow">IA por lead</p>
+                <h2>Resumo operacional</h2>
+              </div>
+            </div>
+            <div class="summary-card">
+              <p class="summary-title">Ana Ribeiro · Negociação</p>
+              <p>Lead quente, comparando com solução atual em planilhas. Objeção principal: confiança na disciplina do time.</p>
+              <ul>
+                <li>Sinais de compra: pediu ROI e onboarding</li>
+                <li>Risco: silêncio de 18h após proposta</li>
+                <li>Próxima melhor ação: follow-up com caso e urgência</li>
+              </ul>
+              <blockquote>
+                “Ana, se eu te mostrar como sua equipe ganha visibilidade do follow-up já nesta semana, faz sentido avançarmos hoje?”
+              </blockquote>
+            </div>
+          </article>
+        </section>
+
+        <section class="content-grid" id="pipeline">
+          <article class="panel wide-panel">
+            <div class="section-row">
+              <div>
+                <p class="eyebrow">Pipeline</p>
+                <h2>Kanban comercial</h2>
+              </div>
+            </div>
+            <div class="kanban-grid">
+              <div class="kanban-column">
+                <h3>Entrada <span>18</span></h3>
+                <div class="kanban-card">
+                  <strong>Juliana Costa</strong>
+                  <span>Instagram · Warm</span>
+                </div>
+                <div class="kanban-card">
+                  <strong>Leandro Sales</strong>
+                  <span>Indicação · Hot</span>
+                </div>
+              </div>
+              <div class="kanban-column">
+                <h3>Qualificado <span>10</span></h3>
+                <div class="kanban-card">
+                  <strong>Agência Aurora</strong>
+                  <span>Aging 2d · R$ 12k</span>
+                </div>
+              </div>
+              <div class="kanban-column">
+                <h3>Negociação <span>7</span></h3>
+                <div class="kanban-card critical">
+                  <strong>Ana Ribeiro</strong>
+                  <span>Aging 3d · risco alto</span>
+                </div>
+                <div class="kanban-card">
+                  <strong>Clínica Lumina</strong>
+                  <span>Aging 1d · R$ 32k</span>
+                </div>
+              </div>
+              <div class="kanban-column">
+                <h3>Fechado <span>5</span></h3>
+                <div class="kanban-card success">
+                  <strong>Mentoria Prime</strong>
+                  <span>Won · R$ 24k</span>
+                </div>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="content-grid" id="tasks">
+          <article class="panel">
+            <p class="eyebrow">Tasks & follow-up</p>
+            <h2>Hoje</h2>
+            <ul class="task-list">
+              <li><strong>16:30</strong> Follow-up Ana Ribeiro — enviar caso de uso</li>
+              <li><strong>17:00</strong> Confirmar call Clínica Lumina</li>
+              <li><strong>18:00</strong> Ligar para Lucas Neri</li>
+            </ul>
+          </article>
+          <article class="panel">
+            <p class="eyebrow">Analytics</p>
+            <h2>Insights automáticos</h2>
+            <ul class="insight-list">
+              <li>Sua maior queda está entre Qualificado e Negociação.</li>
+              <li>Carla tem maior taxa de ganho, mas também mais tarefas vencidas.</li>
+              <li>Indicação converte 2,4x melhor que Instagram nesta semana.</li>
+            </ul>
+          </article>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
