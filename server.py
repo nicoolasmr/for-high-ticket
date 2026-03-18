@@ -11,6 +11,8 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / 'revenue_os.db'
 
+SEED_WORKSPACES = [('ws-default', 'High Ticket Labs'), ('ws-clinics', 'Clinic Sales Ops')]
+
 SEED_STAGES = [
     ('entry', 'Entrada', 1),
     ('qualified', 'Qualificado', 2),
@@ -21,6 +23,7 @@ SEED_STAGES = [
 
 SEED_LEADS = [
     {
+        'workspace_id': 'ws-default',
         'id': 'lead-1',
         'name': 'Ana Ribeiro',
         'company': 'Vértice Educação',
@@ -39,6 +42,7 @@ SEED_LEADS = [
         'suggested_reply': 'Ana, se eu te mostrar como seu time opera follow-up com clareza ainda nesta semana, faz sentido fecharmos a ativação hoje?',
     },
     {
+        'workspace_id': 'ws-default',
         'id': 'lead-2',
         'name': 'Lucas Neri',
         'company': 'Neri Advisory',
@@ -57,6 +61,7 @@ SEED_LEADS = [
         'suggested_reply': 'Lucas, te mostro em 4 minutos como o Revenue OS reduz leads esquecidos e dá previsibilidade real ao gestor.',
     },
     {
+        'workspace_id': 'ws-clinics',
         'id': 'lead-3',
         'name': 'Clínica Lumina',
         'company': 'Clínica Lumina',
@@ -75,6 +80,7 @@ SEED_LEADS = [
         'suggested_reply': 'Conseguimos estruturar o time com follow-up e prioridades já no onboarding. Queremos validar isso com vocês na call de amanhã.',
     },
     {
+        'workspace_id': 'ws-default',
         'id': 'lead-4',
         'name': 'Juliana Costa',
         'company': 'JC Consultoria',
@@ -101,11 +107,7 @@ SEED_TASKS = [
     ('lead-4', '18:00', 'Primeira resposta para Juliana Costa', 'high', 0),
 ]
 
-SEED_TEAM = [
-    ('Carla', 'manager'),
-    ('Marcos', 'rep'),
-    ('Rafa', 'rep'),
-]
+SEED_TEAM = [('ws-default', 'Carla', 'manager'), ('ws-default', 'Marcos', 'rep'), ('ws-default', 'Rafa', 'rep'), ('ws-clinics', 'Bruna', 'manager')]
 
 SEED_ONBOARDING = [
     ('Definir nome do workspace', 1),
@@ -134,6 +136,11 @@ def init_db(db_path: Path = DB_PATH) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(
             '''
+            create table if not exists workspaces (
+                id text primary key,
+                name text not null
+            );
+
             create table if not exists stages (
                 id text primary key,
                 name text not null,
@@ -142,6 +149,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
 
             create table if not exists leads (
                 id text primary key,
+                workspace_id text not null references workspaces(id),
                 name text not null,
                 company text not null,
                 owner text not null,
@@ -171,6 +179,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
 
             create table if not exists team_members (
                 id integer primary key autoincrement,
+                workspace_id text not null references workspaces(id),
                 name text not null,
                 role text not null
             );
@@ -209,22 +218,24 @@ def log_event(conn: sqlite3.Connection, lead_id: str, event_type: str, payload: 
 
 
 def seed_db(conn: sqlite3.Connection) -> None:
-    has_leads = conn.execute('select count(*) as count from leads').fetchone()['count']
+    has_leads = conn.execute('select count(*) as count from leads where workspace_id = ?', ('ws-default',)).fetchone()['count']
     if has_leads:
         return
 
+    conn.executemany('insert into workspaces (id, name) values (?, ?)', SEED_WORKSPACES)
     conn.executemany('insert into stages (id, name, order_index) values (?, ?, ?)', SEED_STAGES)
     conn.executemany(
         '''
         insert into leads (
-            id, name, company, owner, source, stage_id, temperature, value, next_action,
+            id, workspace_id, name, company, owner, source, stage_id, temperature, value, next_action,
             status, lost_reason, last_reply_hours, summary_text, objections_json, signals_json,
             next_best_action, suggested_reply
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''',
         [
             (
                 lead['id'],
+                lead['workspace_id'],
                 lead['name'],
                 lead['company'],
                 lead['owner'],
@@ -245,7 +256,7 @@ def seed_db(conn: sqlite3.Connection) -> None:
             for lead in SEED_LEADS
         ],
     )
-    conn.executemany('insert into team_members (name, role) values (?, ?)', SEED_TEAM)
+    conn.executemany('insert into team_members (workspace_id, name, role) values (?, ?, ?)', SEED_TEAM)
     conn.executemany('insert into tasks (lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?)', SEED_TASKS)
     conn.executemany('insert into onboarding_steps (title, done) values (?, ?)', SEED_ONBOARDING)
     for lead_id, author, body in SEED_NOTES:
@@ -256,18 +267,19 @@ def seed_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def fetch_leads(conn: sqlite3.Connection, search: str = '', owner: str = 'all', temperature: str = 'all', status: str = 'all') -> list[dict]:
+def fetch_leads(conn: sqlite3.Connection, workspace_id: str = 'ws-default', search: str = '', owner: str = 'all', temperature: str = 'all', status: str = 'all') -> list[dict]:
     query = '''
         select leads.*, stages.name as stage_name
         from leads
         join stages on stages.id = leads.stage_id
-        where (? = '' or lower(leads.name || ' ' || leads.company || ' ' || leads.source) like '%' || lower(?) || '%')
+        where leads.workspace_id = ?
+          and (? = '' or lower(leads.name || ' ' || leads.company || ' ' || leads.source) like '%' || lower(?) || '%')
           and (? = 'all' or leads.owner = ?)
           and (? = 'all' or leads.temperature = ?)
           and (? = 'all' or lower(leads.status) like '%' || lower(?) || '%')
         order by leads.last_reply_hours desc, leads.value desc
     '''
-    rows = conn.execute(query, (search, search, owner, owner, temperature, temperature, status, status)).fetchall()
+    rows = conn.execute(query, (workspace_id, search, search, owner, owner, temperature, temperature, status, status)).fetchall()
     return [serialize_lead(row) for row in rows]
 
 
@@ -311,13 +323,16 @@ def fetch_summary(conn: sqlite3.Connection, lead_id: str) -> dict | None:
     }
 
 
-def fetch_dashboard(conn: sqlite3.Connection) -> dict:
-    total_leads = conn.execute('select count(*) as count from leads').fetchone()['count']
-    hot_leads = conn.execute("select count(*) as count from leads where temperature = 'hot'").fetchone()['count']
-    risky = conn.execute('select count(*) as count from leads where last_reply_hours >= 18 and status not in ("Ganho", "Perdido")').fetchone()['count']
-    revenue = conn.execute('select coalesce(sum(value), 0) as total from leads').fetchone()['total']
+def fetch_dashboard(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> dict:
+    total_leads = conn.execute('select count(*) as count from leads where workspace_id = ?', (workspace_id,)).fetchone()['count']
+    hot_leads = conn.execute("select count(*) as count from leads where workspace_id = ? and temperature = 'hot'", (workspace_id,)).fetchone()['count']
+    risky = conn.execute(
+        'select count(*) as count from leads where workspace_id = ? and last_reply_hours >= 18 and status not in ("Ganho", "Perdido")',
+        (workspace_id,),
+    ).fetchone()['count']
+    revenue = conn.execute('select coalesce(sum(value), 0) as total from leads where workspace_id = ?', (workspace_id,)).fetchone()['total']
     priority_tasks = conn.execute("select count(*) as count from tasks where priority in ('urgent', 'high') and completed = 0").fetchone()['count']
-    priorities = conn.execute('select id, name, company, owner, last_reply_hours from leads order by last_reply_hours desc, value desc limit 3').fetchall()
+    priorities = conn.execute('select id, name, company, owner, last_reply_hours from leads where workspace_id = ? order by last_reply_hours desc, value desc limit 3', (workspace_id,)).fetchall()
     return {
         'kpis': [
             {'label': 'Leads no pipeline', 'value': total_leads, 'detail': f'{hot_leads} quentes'},
@@ -333,11 +348,11 @@ def fetch_dashboard(conn: sqlite3.Connection) -> dict:
     }
 
 
-def fetch_pipeline(conn: sqlite3.Connection) -> list[dict]:
+def fetch_pipeline(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> list[dict]:
     stages = conn.execute('select id, name from stages order by order_index asc').fetchall()
     payload = []
     for stage in stages:
-        leads = conn.execute('select id, name, company, owner, value from leads where stage_id = ? order by value desc', (stage['id'],)).fetchall()
+        leads = conn.execute('select id, name, company, owner, value from leads where workspace_id = ? and stage_id = ? order by value desc', (workspace_id, stage['id'])).fetchall()
         payload.append({'id': stage['id'], 'name': stage['name'], 'leads': [dict(row) for row in leads]})
     return payload
 
@@ -355,16 +370,18 @@ def fetch_tasks(conn: sqlite3.Connection) -> dict:
 
 def create_lead(conn: sqlite3.Connection, payload: dict) -> dict:
     lead_id = f'lead-{uuid4().hex[:8]}'
+    workspace_id = payload.get('workspaceId', 'ws-default')
     stage_id = payload.get('stageId') or 'entry'
     conn.execute(
         '''
         insert into leads (
-            id, name, company, owner, source, stage_id, temperature, value, next_action, status,
+            id, workspace_id, name, company, owner, source, stage_id, temperature, value, next_action, status,
             lost_reason, last_reply_hours, summary_text, objections_json, signals_json, next_best_action, suggested_reply
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''',
         (
             lead_id,
+            workspace_id,
             payload['name'],
             payload.get('company', 'Sem empresa'),
             payload.get('owner', 'Unassigned'),
@@ -460,21 +477,27 @@ def fetch_timeline(conn: sqlite3.Connection, lead_id: str) -> list[dict]:
 
 
 
-def fetch_team(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute('select id, name, role from team_members order by id asc').fetchall()
+
+
+def fetch_workspaces(conn: sqlite3.Connection) -> list[dict]:
+    return [dict(row) for row in conn.execute('select id, name from workspaces order by id asc').fetchall()]
+
+def fetch_team(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> list[dict]:
+    rows = conn.execute('select id, name, role from team_members where workspace_id = ? order by id asc', (workspace_id,)).fetchall()
     return [dict(row) for row in rows]
 
 
 def invite_team_member(conn: sqlite3.Connection, payload: dict) -> dict:
-    cursor = conn.execute('insert into team_members (name, role) values (?, ?)', (payload['name'], payload.get('role', 'rep')))
+    workspace_id = payload.get('workspaceId', 'ws-default')
+    cursor = conn.execute('insert into team_members (workspace_id, name, role) values (?, ?, ?)', (workspace_id, payload['name'], payload.get('role', 'rep')))
     member_id = cursor.lastrowid
     conn.commit()
     return dict(conn.execute('select id, name, role from team_members where id = ?', (member_id,)).fetchone())
 
-def fetch_analytics(conn: sqlite3.Connection) -> dict:
-    sources = conn.execute('select source, count(*) as count, sum(value) as revenue from leads group by source order by revenue desc').fetchall()
-    owners = conn.execute('select owner, count(*) as count, sum(value) as revenue from leads group by owner order by revenue desc').fetchall()
-    statuses = conn.execute('select status, count(*) as count, sum(value) as revenue from leads group by status order by count desc').fetchall()
+def fetch_analytics(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> dict:
+    sources = conn.execute('select source, count(*) as count, sum(value) as revenue from leads where workspace_id = ? group by source order by revenue desc', (workspace_id,)).fetchall()
+    owners = conn.execute('select owner, count(*) as count, sum(value) as revenue from leads where workspace_id = ? group by owner order by revenue desc', (workspace_id,)).fetchall()
+    statuses = conn.execute('select status, count(*) as count, sum(value) as revenue from leads where workspace_id = ? group by status order by count desc', (workspace_id,)).fetchall()
     insights = [
         'Sua maior queda está entre Qualificado e Negociação.',
         'Carla tem a maior taxa de ganho, mas também o maior volume em risco.',
@@ -529,9 +552,9 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/health':
                 return self.write_json({'status': 'ok'})
             if parsed.path == '/api/dashboard':
-                return self.write_json(fetch_dashboard(conn))
+                return self.write_json(fetch_dashboard(conn, params.get('workspace', ['ws-default'])[0]))
             if parsed.path == '/api/leads':
-                return self.write_json({'items': fetch_leads(conn, search=params.get('search', [''])[0], owner=params.get('owner', ['all'])[0], temperature=params.get('temperature', ['all'])[0], status=params.get('status', ['all'])[0])})
+                return self.write_json({'items': fetch_leads(conn, workspace_id=params.get('workspace', ['ws-default'])[0], search=params.get('search', [''])[0], owner=params.get('owner', ['all'])[0], temperature=params.get('temperature', ['all'])[0], status=params.get('status', ['all'])[0])})
             if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/summary'):
                 lead_id = parsed.path.split('/')[3]
                 summary = fetch_summary(conn, lead_id)
@@ -543,15 +566,17 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                 lead_id = parsed.path.split('/')[3]
                 return self.write_json({'items': fetch_timeline(conn, lead_id)})
             if parsed.path == '/api/pipeline':
-                return self.write_json({'stages': fetch_pipeline(conn)})
+                return self.write_json({'stages': fetch_pipeline(conn, params.get('workspace', ['ws-default'])[0])})
             if parsed.path == '/api/tasks':
                 return self.write_json(fetch_tasks(conn))
             if parsed.path == '/api/analytics':
-                return self.write_json(fetch_analytics(conn))
+                return self.write_json(fetch_analytics(conn, params.get('workspace', ['ws-default'])[0]))
             if parsed.path == '/api/stages':
                 return self.write_json({'items': fetch_stages(conn)})
             if parsed.path == '/api/team':
-                return self.write_json({'items': fetch_team(conn)})
+                return self.write_json({'items': fetch_team(conn, params.get('workspace', ['ws-default'])[0])})
+            if parsed.path == '/api/workspaces':
+                return self.write_json({'items': fetch_workspaces(conn)})
         self.write_json({'error': 'Not found'}, status=404)
 
     def handle_api_write(self, parsed, method: str) -> None:

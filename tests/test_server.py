@@ -18,11 +18,11 @@ class RevenueOSTestCase(unittest.TestCase):
 
     def test_seeded_leads_exist(self):
         leads = server.fetch_leads(self.conn)
-        self.assertGreaterEqual(len(leads), 4)
+        self.assertGreaterEqual(len(leads), 3)
         self.assertEqual(leads[0]['id'], 'lead-1')
 
     def test_filters_work(self):
-        leads = server.fetch_leads(self.conn, owner='Carla', temperature='hot', status='proposta')
+        leads = server.fetch_leads(self.conn, workspace_id='ws-clinics', owner='Carla', temperature='hot', status='proposta')
         ids = {lead['id'] for lead in leads}
         self.assertEqual(ids, {'lead-3'})
 
@@ -36,6 +36,12 @@ class RevenueOSTestCase(unittest.TestCase):
         dashboard = server.fetch_dashboard(self.conn)
         self.assertEqual(len(dashboard['kpis']), 4)
         self.assertEqual(len(dashboard['priorities']), 3)
+
+    def test_workspaces_are_isolated(self):
+        default_leads = {lead['id'] for lead in server.fetch_leads(self.conn, workspace_id='ws-default')}
+        clinic_leads = {lead['id'] for lead in server.fetch_leads(self.conn, workspace_id='ws-clinics')}
+        self.assertEqual(default_leads, {'lead-1', 'lead-2', 'lead-4'})
+        self.assertEqual(clinic_leads, {'lead-3'})
 
     def test_analytics_payload(self):
         analytics = server.fetch_analytics(self.conn)
