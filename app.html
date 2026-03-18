@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Revenue OS App | Interactive MVP</title>
+    <meta
+      name="description"
+      content="Demo interativa do Revenue OS com leads, pipeline, follow-up, analytics e resumo IA."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="app-body">
+    <div class="app-shell">
+      <aside class="sidebar glass-card">
+        <div>
+          <a class="brand" href="index.html">Revenue OS</a>
+          <p class="sidebar-copy">Cockpit comercial para operações high ticket.</p>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Navegação principal">
+          <button class="nav-item active" data-view="dashboard">Dashboard</button>
+          <button class="nav-item" data-view="leads">Leads</button>
+          <button class="nav-item" data-view="pipeline">Pipeline</button>
+          <button class="nav-item" data-view="tasks">Tasks</button>
+          <button class="nav-item" data-view="analytics">Analytics</button>
+        </nav>
+
+        <div class="workspace-box">
+          <span class="label">Workspace</span>
+          <strong>High Ticket Labs</strong>
+          <small>Growth plan · Trial ativo</small>
+        </div>
+      </aside>
+
+      <main class="main-panel">
+        <header class="toolbar glass-card">
+          <div>
+            <span class="eyebrow">Revenue OS demo</span>
+            <h1 id="view-title">Dashboard operacional</h1>
+          </div>
+          <div class="toolbar-actions">
+            <label class="search-field" for="lead-search">
+              <span>Buscar lead</span>
+              <input id="lead-search" type="search" placeholder="Nome, empresa ou origem" />
+            </label>
+            <a class="button button-ghost" href="index.html">Voltar ao site</a>
+          </div>
+        </header>
+
+        <section class="view-stack" id="dashboard-view">
+          <div class="stat-grid four-up" id="kpi-grid"></div>
+          <div class="dashboard-grid">
+            <section class="glass-card">
+              <div class="section-header">
+                <div>
+                  <span class="label">Prioridades</span>
+                  <h2>Fila de execução</h2>
+                </div>
+                <span class="pill pill-danger" id="priority-pill"></span>
+              </div>
+              <div id="priority-list" class="stack-list"></div>
+            </section>
+
+            <section class="glass-card">
+              <div class="section-header">
+                <div>
+                  <span class="label">Inteligência comercial</span>
+                  <h2>Resumo IA do lead selecionado</h2>
+                </div>
+              </div>
+              <div id="ai-summary" class="ai-summary"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view-stack hidden" id="leads-view">
+          <div class="glass-card">
+            <div class="section-header">
+              <div>
+                <span class="label">Lead Inbox</span>
+                <h2>Leads priorizados por urgência</h2>
+              </div>
+              <div class="filter-row">
+                <select id="owner-filter" aria-label="Filtrar por owner"></select>
+                <select id="temperature-filter" aria-label="Filtrar por temperatura"></select>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Lead</th>
+                    <th>Etapa</th>
+                    <th>Owner</th>
+                    <th>Temperatura</th>
+                    <th>Próxima ação</th>
+                    <th>Valor</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="leads-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="view-stack hidden" id="pipeline-view">
+          <div class="glass-card">
+            <div class="section-header">
+              <div>
+                <span class="label">Pipeline</span>
+                <h2>Kanban comercial do workspace</h2>
+              </div>
+            </div>
+            <div id="pipeline-board" class="pipeline-board"></div>
+          </div>
+        </section>
+
+        <section class="view-stack hidden" id="tasks-view">
+          <div class="dashboard-grid">
+            <section class="glass-card">
+              <div class="section-header">
+                <div>
+                  <span class="label">Tasks de hoje</span>
+                  <h2>Execução comercial</h2>
+                </div>
+              </div>
+              <div id="task-list" class="stack-list"></div>
+            </section>
+
+            <section class="glass-card">
+              <div class="section-header">
+                <div>
+                  <span class="label">Onboarding</span>
+                  <h2>Checklist de ativação</h2>
+                </div>
+              </div>
+              <div id="onboarding-list" class="stack-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view-stack hidden" id="analytics-view">
+          <div class="dashboard-grid analytics-grid">
+            <section class="glass-card">
+              <div class="section-header">
+                <div>
+                  <span class="label">Insights</span>
+                  <h2>Leituras automáticas</h2>
+                </div>
+              </div>
+              <div id="insights-list" class="stack-list"></div>
+            </section>
+            <section class="glass-card">
+              <div class="section-header">
+                <div>
+                  <span class="label">Receita</span>
+                  <h2>Resumo por origem</h2>
+                </div>
+              </div>
+              <div id="source-performance" class="stack-list"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
