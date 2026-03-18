@@ -38,17 +38,7 @@ class RevenueOSTestCase(unittest.TestCase):
         self.assertEqual(len(dashboard['priorities']), 3)
 
     def test_create_lead(self):
-        lead = server.create_lead(
-            self.conn,
-            {
-                'name': 'Novo Lead',
-                'company': 'Empresa X',
-                'owner': 'Bia',
-                'source': 'Manual',
-                'temperature': 'hot',
-                'value': 9900,
-            },
-        )
+        lead = server.create_lead(self.conn, {'name': 'Novo Lead', 'company': 'Empresa X', 'owner': 'Bia', 'source': 'Manual', 'temperature': 'hot', 'value': 9900})
         self.assertEqual(lead['name'], 'Novo Lead')
         self.assertEqual(lead['stageId'], 'entry')
 
@@ -68,6 +58,17 @@ class RevenueOSTestCase(unittest.TestCase):
         self.assertEqual(note['author'], 'Carla')
         notes = server.fetch_notes(self.conn, 'lead-1')
         self.assertTrue(any(item['body'] == 'Lead pediu validação de ROI.' for item in notes))
+
+    def test_mark_won_and_lost(self):
+        won = server.mark_lead_status(self.conn, 'lead-2', 'Ganho')
+        self.assertEqual(won['stageId'], 'won')
+        lost = server.mark_lead_status(self.conn, 'lead-3', 'Perdido', 'Sem budget')
+        self.assertEqual(lost['lostReason'], 'Sem budget')
+
+    def test_timeline_collects_events(self):
+        server.create_note(self.conn, 'lead-1', {'author': 'Carla', 'body': 'Nova nota de timeline'})
+        timeline = server.fetch_timeline(self.conn, 'lead-1')
+        self.assertTrue(any(item['eventType'] == 'note_added' for item in timeline))
 
 
 if __name__ == '__main__':

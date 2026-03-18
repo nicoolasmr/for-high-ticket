@@ -114,6 +114,10 @@ SEED_NOTES = [
 ]
 
 
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -141,6 +145,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 value integer not null,
                 next_action text not null,
                 status text not null,
+                lost_reason text,
                 last_reply_hours integer not null,
                 summary_text text not null,
                 objections_json text not null,
@@ -171,9 +176,24 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 body text not null,
                 created_at text not null
             );
+
+            create table if not exists events (
+                id integer primary key autoincrement,
+                lead_id text not null references leads(id),
+                event_type text not null,
+                payload_json text not null,
+                created_at text not null
+            );
             '''
         )
         seed_db(conn)
+
+
+def log_event(conn: sqlite3.Connection, lead_id: str, event_type: str, payload: dict) -> None:
+    conn.execute(
+        'insert into events (lead_id, event_type, payload_json, created_at) values (?, ?, ?, ?)',
+        (lead_id, event_type, json.dumps(payload), utc_now()),
+    )
 
 
 def seed_db(conn: sqlite3.Connection) -> None:
@@ -186,9 +206,9 @@ def seed_db(conn: sqlite3.Connection) -> None:
         '''
         insert into leads (
             id, name, company, owner, source, stage_id, temperature, value, next_action,
-            status, last_reply_hours, summary_text, objections_json, signals_json,
+            status, lost_reason, last_reply_hours, summary_text, objections_json, signals_json,
             next_best_action, suggested_reply
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''',
         [
             (
@@ -202,6 +222,7 @@ def seed_db(conn: sqlite3.Connection) -> None:
                 lead['value'],
                 lead['next_action'],
                 lead['status'],
+                None,
                 lead['last_reply_hours'],
                 lead['summary_text'],
                 json.dumps(lead['objections']),
@@ -214,10 +235,11 @@ def seed_db(conn: sqlite3.Connection) -> None:
     )
     conn.executemany('insert into tasks (lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?)', SEED_TASKS)
     conn.executemany('insert into onboarding_steps (title, done) values (?, ?)', SEED_ONBOARDING)
-    conn.executemany(
-        'insert into notes (lead_id, author, body, created_at) values (?, ?, ?, ?)',
-        [(lead_id, author, body, datetime.now(timezone.utc).isoformat()) for lead_id, author, body in SEED_NOTES],
-    )
+    for lead_id, author, body in SEED_NOTES:
+        conn.execute('insert into notes (lead_id, author, body, created_at) values (?, ?, ?, ?)', (lead_id, author, body, utc_now()))
+        log_event(conn, lead_id, 'note_added', {'author': author, 'body': body})
+    for lead in SEED_LEADS:
+        log_event(conn, lead['id'], 'lead_seeded', {'stageId': lead['stage_id'], 'status': lead['status']})
     conn.commit()
 
 
@@ -248,6 +270,7 @@ def serialize_lead(row: sqlite3.Row) -> dict:
         'value': row['value'],
         'nextAction': row['next_action'],
         'status': row['status'],
+        'lostReason': row['lost_reason'],
         'lastReplyHours': row['last_reply_hours'],
     }
 
@@ -264,6 +287,8 @@ def fetch_summary(conn: sqlite3.Connection, lead_id: str) -> dict | None:
         'name': row['name'],
         'company': row['company'],
         'stageName': row['stage_name'],
+        'status': row['status'],
+        'lostReason': row['lost_reason'],
         'text': row['summary_text'],
         'objections': json.loads(row['objections_json']),
         'signals': json.loads(row['signals_json']),
@@ -275,12 +300,10 @@ def fetch_summary(conn: sqlite3.Connection, lead_id: str) -> dict | None:
 def fetch_dashboard(conn: sqlite3.Connection) -> dict:
     total_leads = conn.execute('select count(*) as count from leads').fetchone()['count']
     hot_leads = conn.execute("select count(*) as count from leads where temperature = 'hot'").fetchone()['count']
-    risky = conn.execute('select count(*) as count from leads where last_reply_hours >= 18').fetchone()['count']
+    risky = conn.execute('select count(*) as count from leads where last_reply_hours >= 18 and status not in ("Ganho", "Perdido")').fetchone()['count']
     revenue = conn.execute('select coalesce(sum(value), 0) as total from leads').fetchone()['total']
     priority_tasks = conn.execute("select count(*) as count from tasks where priority in ('urgent', 'high') and completed = 0").fetchone()['count']
-    priorities = conn.execute(
-        'select id, name, company, owner, last_reply_hours from leads order by last_reply_hours desc, value desc limit 3'
-    ).fetchall()
+    priorities = conn.execute('select id, name, company, owner, last_reply_hours from leads order by last_reply_hours desc, value desc limit 3').fetchall()
     return {
         'kpis': [
             {'label': 'Leads no pipeline', 'value': total_leads, 'detail': f'{hot_leads} quentes'},
@@ -289,16 +312,10 @@ def fetch_dashboard(conn: sqlite3.Connection) -> dict:
             {'label': 'Tasks prioritárias', 'value': priority_tasks, 'detail': 'Hoje'},
         ],
         'priorities': [
-            {
-                'id': row['id'],
-                'name': row['name'],
-                'company': row['company'],
-                'owner': row['owner'],
-                'lastReplyHours': row['last_reply_hours'],
-            }
+            {'id': row['id'], 'name': row['name'], 'company': row['company'], 'owner': row['owner'], 'lastReplyHours': row['last_reply_hours']}
             for row in priorities
         ],
-        'generatedAt': datetime.now(timezone.utc).isoformat(),
+        'generatedAt': utc_now(),
     }
 
 
@@ -306,17 +323,13 @@ def fetch_pipeline(conn: sqlite3.Connection) -> list[dict]:
     stages = conn.execute('select id, name from stages order by order_index asc').fetchall()
     payload = []
     for stage in stages:
-        leads = conn.execute(
-            'select id, name, company, owner, value from leads where stage_id = ? order by value desc', (stage['id'],)
-        ).fetchall()
+        leads = conn.execute('select id, name, company, owner, value from leads where stage_id = ? order by value desc', (stage['id'],)).fetchall()
         payload.append({'id': stage['id'], 'name': stage['name'], 'leads': [dict(row) for row in leads]})
     return payload
 
 
 def fetch_tasks(conn: sqlite3.Connection) -> dict:
-    tasks = conn.execute(
-        'select id, lead_id, due_time, title, priority from tasks where completed = 0 order by due_time asc'
-    ).fetchall()
+    tasks = conn.execute('select id, lead_id, due_time, title, priority from tasks where completed = 0 order by due_time asc').fetchall()
     onboarding = conn.execute('select title, done from onboarding_steps order by id asc').fetchall()
     completed_count = conn.execute('select count(*) as count from tasks where completed = 1').fetchone()['count']
     return {
@@ -327,14 +340,14 @@ def fetch_tasks(conn: sqlite3.Connection) -> dict:
 
 
 def create_lead(conn: sqlite3.Connection, payload: dict) -> dict:
-    lead_id = f"lead-{uuid4().hex[:8]}"
+    lead_id = f'lead-{uuid4().hex[:8]}'
     stage_id = payload.get('stageId') or 'entry'
     conn.execute(
         '''
         insert into leads (
             id, name, company, owner, source, stage_id, temperature, value, next_action, status,
-            last_reply_hours, summary_text, objections_json, signals_json, next_best_action, suggested_reply
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            lost_reason, last_reply_hours, summary_text, objections_json, signals_json, next_best_action, suggested_reply
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''',
         (
             lead_id,
@@ -347,6 +360,7 @@ def create_lead(conn: sqlite3.Connection, payload: dict) -> dict:
             int(payload.get('value', 0)),
             payload.get('nextAction', 'Hoje, 17:00'),
             'Novo lead',
+            None,
             0,
             payload.get('summaryText', 'Lead criado manualmente no workspace.'),
             json.dumps(payload.get('objections', ['Sem objeções mapeadas ainda'])),
@@ -355,11 +369,9 @@ def create_lead(conn: sqlite3.Connection, payload: dict) -> dict:
             payload.get('suggestedReply', 'Olá! Quero entender seu cenário e te mostrar como o Revenue OS pode ajudar.'),
         ),
     )
+    log_event(conn, lead_id, 'lead_created', {'stageId': stage_id})
     conn.commit()
-    row = conn.execute(
-        'select leads.*, stages.name as stage_name from leads join stages on stages.id = leads.stage_id where leads.id = ?',
-        (lead_id,),
-    ).fetchone()
+    row = conn.execute('select leads.*, stages.name as stage_name from leads join stages on stages.id = leads.stage_id where leads.id = ?', (lead_id,)).fetchone()
     return serialize_lead(row)
 
 
@@ -368,60 +380,68 @@ def update_lead_stage(conn: sqlite3.Connection, lead_id: str, stage_id: str) -> 
     conn.execute('update leads set stage_id = ?, status = ? where id = ?', (stage_id, 'Etapa atualizada', lead_id))
     if conn.total_changes == before:
         return None
+    log_event(conn, lead_id, 'stage_changed', {'stageId': stage_id})
     conn.commit()
-    row = conn.execute(
-        'select leads.*, stages.name as stage_name from leads join stages on stages.id = leads.stage_id where leads.id = ?',
-        (lead_id,),
-    ).fetchone()
+    row = conn.execute('select leads.*, stages.name as stage_name from leads join stages on stages.id = leads.stage_id where leads.id = ?', (lead_id,)).fetchone()
+    return serialize_lead(row) if row else None
+
+
+def mark_lead_status(conn: sqlite3.Connection, lead_id: str, status: str, lost_reason: str | None = None) -> dict | None:
+    before = conn.total_changes
+    stage_id = 'won' if status == 'Ganho' else conn.execute('select stage_id from leads where id = ?', (lead_id,)).fetchone()
+    next_stage = 'won' if status == 'Ganho' else (stage_id['stage_id'] if stage_id else 'proposal')
+    conn.execute('update leads set status = ?, lost_reason = ?, stage_id = ? where id = ?', (status, lost_reason, next_stage, lead_id))
+    if conn.total_changes == before:
+        return None
+    log_event(conn, lead_id, 'status_changed', {'status': status, 'lostReason': lost_reason})
+    conn.commit()
+    row = conn.execute('select leads.*, stages.name as stage_name from leads join stages on stages.id = leads.stage_id where leads.id = ?', (lead_id,)).fetchone()
     return serialize_lead(row) if row else None
 
 
 def fetch_stages(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute('select id, name from stages order by order_index asc').fetchall()
-    return [dict(row) for row in rows]
+    return [dict(row) for row in conn.execute('select id, name from stages order by order_index asc').fetchall()]
 
 
 def fetch_notes(conn: sqlite3.Connection, lead_id: str) -> list[dict]:
-    rows = conn.execute(
-        'select id, author, body, created_at from notes where lead_id = ? order by id desc',
-        (lead_id,),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    return [dict(row) for row in conn.execute('select id, author, body, created_at from notes where lead_id = ? order by id desc', (lead_id,)).fetchall()]
 
 
 def create_note(conn: sqlite3.Connection, lead_id: str, payload: dict) -> dict:
-    created_at = datetime.now(timezone.utc).isoformat()
-    conn.execute(
-        'insert into notes (lead_id, author, body, created_at) values (?, ?, ?, ?)',
-        (lead_id, payload.get('author', 'Equipe'), payload['body'], created_at),
-    )
+    created_at = utc_now()
+    author = payload.get('author', 'Equipe')
+    body = payload['body']
+    cursor = conn.execute('insert into notes (lead_id, author, body, created_at) values (?, ?, ?, ?)', (lead_id, author, body, created_at))
+    log_event(conn, lead_id, 'note_added', {'author': author, 'body': body})
+    note_id = cursor.lastrowid
     conn.commit()
-    row = conn.execute('select id, author, body, created_at from notes where rowid = last_insert_rowid()').fetchone()
-    return dict(row)
+    return dict(conn.execute('select id, author, body, created_at from notes where id = ?', (note_id,)).fetchone())
 
 
 def create_task(conn: sqlite3.Connection, payload: dict) -> dict:
-    conn.execute(
-        'insert into tasks (lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, 0)',
-        (
-            payload.get('leadId'),
-            payload.get('dueTime', 'Hoje, 17:00'),
-            payload['title'],
-            payload.get('priority', 'medium'),
-        ),
-    )
+    lead_id = payload.get('leadId')
+    cursor = conn.execute('insert into tasks (lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, 0)', (lead_id, payload.get('dueTime', 'Hoje, 17:00'), payload['title'], payload.get('priority', 'medium')))
+    if lead_id:
+        log_event(conn, lead_id, 'task_created', {'title': payload['title'], 'priority': payload.get('priority', 'medium')})
+    task_id = cursor.lastrowid
     conn.commit()
-    row = conn.execute('select id, lead_id, due_time, title, priority from tasks where rowid = last_insert_rowid()').fetchone()
-    return dict(row)
+    return dict(conn.execute('select id, lead_id, due_time, title, priority from tasks where id = ?', (task_id,)).fetchone())
 
 
 def complete_task(conn: sqlite3.Connection, task_id: int) -> dict | None:
-    before = conn.total_changes
-    conn.execute('update tasks set completed = 1 where id = ?', (task_id,))
-    if conn.total_changes == before:
+    task = conn.execute('select id, lead_id, title from tasks where id = ?', (task_id,)).fetchone()
+    if not task:
         return None
+    conn.execute('update tasks set completed = 1 where id = ?', (task_id,))
+    if task['lead_id']:
+        log_event(conn, task['lead_id'], 'task_completed', {'title': task['title']})
     conn.commit()
     return {'id': task_id, 'completed': True}
+
+
+def fetch_timeline(conn: sqlite3.Connection, lead_id: str) -> list[dict]:
+    rows = conn.execute('select id, event_type, payload_json, created_at from events where lead_id = ? order by id desc', (lead_id,)).fetchall()
+    return [{'id': row['id'], 'eventType': row['event_type'], 'payload': json.loads(row['payload_json']), 'createdAt': row['created_at']} for row in rows]
 
 
 def fetch_analytics(conn: sqlite3.Connection) -> dict:
@@ -477,25 +497,17 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/dashboard':
                 return self.write_json(fetch_dashboard(conn))
             if parsed.path == '/api/leads':
-                return self.write_json(
-                    {
-                        'items': fetch_leads(
-                            conn,
-                            search=params.get('search', [''])[0],
-                            owner=params.get('owner', ['all'])[0],
-                            temperature=params.get('temperature', ['all'])[0],
-                        )
-                    }
-                )
+                return self.write_json({'items': fetch_leads(conn, search=params.get('search', [''])[0], owner=params.get('owner', ['all'])[0], temperature=params.get('temperature', ['all'])[0])})
             if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/summary'):
                 lead_id = parsed.path.split('/')[3]
                 summary = fetch_summary(conn, lead_id)
-                if summary is None:
-                    return self.write_json({'error': 'Lead not found'}, status=404)
-                return self.write_json(summary)
+                return self.write_json(summary if summary else {'error': 'Lead not found'}, status=200 if summary else 404)
             if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/notes'):
                 lead_id = parsed.path.split('/')[3]
                 return self.write_json({'items': fetch_notes(conn, lead_id)})
+            if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/timeline'):
+                lead_id = parsed.path.split('/')[3]
+                return self.write_json({'items': fetch_timeline(conn, lead_id)})
             if parsed.path == '/api/pipeline':
                 return self.write_json({'stages': fetch_pipeline(conn)})
             if parsed.path == '/api/tasks':
@@ -518,14 +530,20 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                 if not payload.get('stageId'):
                     return self.write_json({'error': 'stageId is required'}, status=400)
                 lead = update_lead_stage(conn, lead_id, payload['stageId'])
-                if lead is None:
-                    return self.write_json({'error': 'Lead not found'}, status=404)
-                return self.write_json(lead)
+                return self.write_json(lead if lead else {'error': 'Lead not found'}, status=200 if lead else 404)
             if method == 'POST' and parsed.path.startswith('/api/leads/') and parsed.path.endswith('/notes'):
                 lead_id = parsed.path.split('/')[3]
                 if not payload.get('body'):
                     return self.write_json({'error': 'body is required'}, status=400)
                 return self.write_json(create_note(conn, lead_id, payload), status=201)
+            if method == 'POST' and parsed.path.startswith('/api/leads/') and parsed.path.endswith('/mark-won'):
+                lead_id = parsed.path.split('/')[3]
+                lead = mark_lead_status(conn, lead_id, 'Ganho')
+                return self.write_json(lead if lead else {'error': 'Lead not found'}, status=200 if lead else 404)
+            if method == 'POST' and parsed.path.startswith('/api/leads/') and parsed.path.endswith('/mark-lost'):
+                lead_id = parsed.path.split('/')[3]
+                lead = mark_lead_status(conn, lead_id, 'Perdido', payload.get('lostReason'))
+                return self.write_json(lead if lead else {'error': 'Lead not found'}, status=200 if lead else 404)
             if method == 'POST' and parsed.path == '/api/tasks':
                 if not payload.get('title'):
                     return self.write_json({'error': 'title is required'}, status=400)
@@ -533,9 +551,7 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
             if method == 'POST' and parsed.path.startswith('/api/tasks/') and parsed.path.endswith('/complete'):
                 task_id = int(parsed.path.split('/')[3])
                 task = complete_task(conn, task_id)
-                if task is None:
-                    return self.write_json({'error': 'Task not found'}, status=404)
-                return self.write_json(task)
+                return self.write_json(task if task else {'error': 'Task not found'}, status=200 if task else 404)
         self.write_json({'error': 'Not found'}, status=404)
 
     def write_json(self, payload: dict, status: int = 200) -> None:
