@@ -11,6 +11,8 @@ const ownerFilter = qs('#owner-filter')
 const temperatureFilter = qs('#temperature-filter')
 const statusFilter = qs('#status-filter')
 const workspaceSwitcher = qs('#workspace-switcher')
+const workspaceName = qs('#workspace-name')
+const workspaceMeta = qs('#workspace-meta')
 const leadOwnerInput = qs('#lead-owner')
 const leadForm = qs('#lead-form')
 const noteForm = qs('#note-form')
@@ -64,6 +66,11 @@ function setView(view) {
 function renderFilters() {
   workspaceSwitcher.innerHTML = state.workspaces.map((workspace) => `<option value="${workspace.id}">${workspace.name}</option>`).join('')
   workspaceSwitcher.value = state.workspaceId
+  const currentWorkspace = state.workspaces.find((workspace) => workspace.id === state.workspaceId)
+  if (currentWorkspace) {
+    workspaceName.textContent = currentWorkspace.name
+    workspaceMeta.textContent = currentWorkspace.id === 'ws-default' ? 'Growth plan · Trial ativo' : 'Vertical playbook · Workspace demo'
+  }
   const owners = ['all', ...new Set(state.team.map((member) => member.name))]
   ownerFilter.innerHTML = owners.map((owner) => `<option value="${owner}">${owner === 'all' ? 'Todos os owners' : owner}</option>`).join('')
   ownerFilter.value = state.owner
@@ -115,7 +122,7 @@ const inviteTeamMember = async (form) => { const payload = Object.fromEntries(ne
 
 function attachEvents() {
   navItems.forEach((item) => item.addEventListener('click', () => setView(item.dataset.view)))
-  workspaceSwitcher.addEventListener('change', async (event) => { state.workspaceId = event.target.value; state.selectedLeadId = null; await refreshOperationalViews() })
+  workspaceSwitcher.addEventListener('change', async (event) => { state.workspaceId = event.target.value; state.selectedLeadId = null; state.owner = 'all'; state.temperature = 'all'; state.status = 'all'; await refreshOperationalViews() })
   searchInput.addEventListener('input', async (event) => { state.search = event.target.value; await loadLeads() })
   ownerFilter.addEventListener('change', async (event) => { state.owner = event.target.value; await loadLeads() })
   temperatureFilter.addEventListener('change', async (event) => { state.temperature = event.target.value; await loadLeads() })

@@ -1,22 +1,73 @@
 # Revenue OS for High Ticket
 
-Fundação inicial do **Revenue OS** com frontend estático e **backend local em Python + SQLite**, permitindo validar uma experiência mais próxima de produto real sem depender de bibliotecas externas.
+MVP local do **Revenue OS** com frontend estático e backend em **Python + SQLite** para validar a operação comercial de times high ticket sem dependências externas.
 
-## Estrutura atual
+## Estado atual do produto
 
-- `index.html`: página pública do produto com posicionamento, módulos, ICP, roadmap e pricing.
-- `app.html`: shell do app que consome dados reais da API local e já suporta leads, notes, follow-ups, timeline, ações de ganho/perda e gestão básica de time.
-- `app.js`: cliente browser que renderiza dashboard, leads, pipeline, tasks, analytics, timeline e interações operacionais.
-- `server.py`: servidor HTTP com rotas da API, persistência em SQLite e operações mutáveis do MVP.
-- `revenue_os.db`: banco local criado automaticamente ao subir a aplicação.
-- `tests/test_server.py`: testes unitários do backend.
+Esta base já cobre:
 
-## Rotas adicionais relevantes
+- página pública de marketing em `index.html`;
+- app operacional em `app.html`;
+- cliente browser em `app.js` com dashboard, lead inbox, pipeline, tasks, analytics, timeline e notas;
+- backend local em `server.py` com API HTTP, persistência SQLite e seed inicial;
+- suporte básico a **workspaces** para segmentar leads, dashboard, pipeline, analytics e time;
+- testes unitários em `tests/test_server.py`.
 
-- `GET /api/team`
-- `POST /api/team`
-- `GET /api/leads?status=...`
+## Estrutura do repositório
+
+- `index.html`: landing page com tese, módulos, ICP, roadmap e pricing beta.
+- `app.html`: shell do app operacional.
+- `app.js`: camada cliente para renderização e interações.
+- `server.py`: API local, schema SQLite, seed e mutações.
+- `styles.css`: estilos da landing page e do app.
+- `docs/mvp-foundation.md`: documentação da iteração atual.
+- `tests/test_server.py`: cobertura do backend.
+
+## Principais rotas
+
+- `GET /api/health`
+- `GET /api/workspaces`
+- `GET /api/dashboard`
+- `GET /api/leads`
+- `POST /api/leads`
+- `PATCH /api/leads/:leadId/stage`
+- `GET /api/leads/:leadId/summary`
+- `GET /api/leads/:leadId/notes`
+- `POST /api/leads/:leadId/notes`
+- `GET /api/leads/:leadId/timeline`
 - `POST /api/leads/:leadId/mark-won`
 - `POST /api/leads/:leadId/mark-lost`
+- `GET /api/pipeline`
+- `GET /api/tasks`
+- `POST /api/tasks`
+- `POST /api/tasks/:taskId/complete`
+- `GET /api/team`
+- `POST /api/team`
+- `GET /api/analytics`
 
-- `GET /api/analytics` agora retorna também recortes por `owner` e `status`.
+## Como rodar localmente
+
+```bash
+python server.py
+```
+
+Depois abra:
+
+- `http://127.0.0.1:3000/` para a landing page;
+- `http://127.0.0.1:3000/app` para a demo do app.
+
+## O que o MVP valida hoje
+
+- organização operacional do pipeline;
+- execução diária via follow-ups e tasks;
+- leitura de contexto por lead com resumo, notas e timeline;
+- visão gerencial básica por origem, owner e status;
+- operação em múltiplos workspaces de forma simplificada.
+
+## Próximos passos naturais
+
+- autenticação e sessão;
+- membership real por workspace;
+- permissões por papel;
+- filtros salvos e automações;
+- billing e access model.

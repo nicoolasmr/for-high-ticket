@@ -2,29 +2,41 @@
 
 ## Evolução desta iteração
 
-O MVP agora cobre mais partes do modelo operacional previsto no blueprint:
+O MVP local agora cobre uma base operacional mais próxima do produto:
 
-- time comercial local com convites básicos;
-- ownership reaproveitado na criação de leads e filtros;
+- time comercial com convites básicos;
+- ownership reutilizado na criação e leitura de leads;
 - filtro por status no lead inbox;
 - timeline de eventos por lead;
 - marcação de ganho/perda com motivo;
-- criação e conclusão de tasks de follow-up;
-- notas por lead com contexto persistido;
-- API HTTP local para dashboard, leads, summary, notes, timeline, pipeline, tasks, analytics, stages e team.
+- tasks de follow-up com conclusão;
+- notas persistidas por lead;
+- analytics por origem, owner e status;
+- suporte inicial a workspaces no backend e na UI.
 
 ## O que isso valida melhor agora
 
-1. **Operação multiusuário simplificada** com owners reais no fluxo.
-2. **Leitura de pipeline por status** além de etapa e temperatura.
-3. **Contrato de dados mais próximo do SaaS final** com leads, team, tasks, notes e events.
+1. **Operação diária comercial** com pipeline, tasks e fila de prioridade.
+2. **Contexto do lead** com notas, timeline e resumo operacional.
+3. **Leitura gerencial simplificada** por owner, origem e status.
+4. **Isolamento básico por workspace** para demonstrar a direção SaaS do produto.
+
+## Limites conhecidos desta fundação
+
+Ainda não existem:
+
+- autenticação real;
+- membership de usuários por workspace;
+- permissões por papel;
+- convites por email;
+- billing;
+- automações e integrações externas.
 
 ## Próxima fase sugerida
 
-- autenticação e workspaces;
-- convites reais por email;
-- filtros avançados e views saved;
-- analytics por owner e status;
-- cobrança e access model.
-
-- analytics por owner e status para visão mais gerencial do funil.
+1. autenticação e sessão;
+2. memberships reais por workspace;
+3. permissões por papel;
+4. filtros avançados e views salvas;
+5. automações comerciais;
+6. billing e access model.
