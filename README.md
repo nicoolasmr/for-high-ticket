@@ -1,32 +1,73 @@
 # Revenue OS for High Ticket
 
-Protótipo inicial do **Revenue OS**, um cockpit comercial para operações high ticket que querem transformar conversas, follow-ups e pipeline em receita previsível.
+MVP local do **Revenue OS** com frontend estático e backend em **Python + SQLite** para validar a operação comercial de times high ticket sem dependências externas.
 
-## O que existe neste repositório agora
+## Estado atual do produto
 
-- `index.html`: landing page de marketing e vendas do produto.
-- `app.html`: demo navegável do dashboard/app MVP.
-- `styles.css`: identidade visual compartilhada entre marketing site e app shell.
+Esta base já cobre:
 
-## Como abrir localmente
+- página pública de marketing em `index.html`;
+- app operacional em `app.html`;
+- cliente browser em `app.js` com dashboard, lead inbox, pipeline, tasks, analytics, timeline e notas;
+- backend local em `server.py` com API HTTP, persistência SQLite e seed inicial;
+- suporte básico a **workspaces** para segmentar leads, dashboard, pipeline, analytics e time;
+- testes unitários em `tests/test_server.py`.
 
-Como este primeiro passo foi estruturado sem dependências externas, basta servir os arquivos estáticos.
+## Estrutura do repositório
 
-### Opção 1: Python
+- `index.html`: landing page com tese, módulos, ICP, roadmap e pricing beta.
+- `app.html`: shell do app operacional.
+- `app.js`: camada cliente para renderização e interações.
+- `server.py`: API local, schema SQLite, seed e mutações.
+- `styles.css`: estilos da landing page e do app.
+- `docs/mvp-foundation.md`: documentação da iteração atual.
+- `tests/test_server.py`: cobertura do backend.
+
+## Principais rotas
+
+- `GET /api/health`
+- `GET /api/workspaces`
+- `GET /api/dashboard`
+- `GET /api/leads`
+- `POST /api/leads`
+- `PATCH /api/leads/:leadId/stage`
+- `GET /api/leads/:leadId/summary`
+- `GET /api/leads/:leadId/notes`
+- `POST /api/leads/:leadId/notes`
+- `GET /api/leads/:leadId/timeline`
+- `POST /api/leads/:leadId/mark-won`
+- `POST /api/leads/:leadId/mark-lost`
+- `GET /api/pipeline`
+- `GET /api/tasks`
+- `POST /api/tasks`
+- `POST /api/tasks/:taskId/complete`
+- `GET /api/team`
+- `POST /api/team`
+- `GET /api/analytics`
+
+## Como rodar localmente
 
 ```bash
-python -m http.server 3000
+python server.py
 ```
 
-Depois, acesse:
+Depois abra:
 
-- `http://localhost:3000/`
-- `http://localhost:3000/app.html`
+- `http://127.0.0.1:3000/` para a landing page;
+- `http://127.0.0.1:3000/app` para a demo do app.
 
-## Próximos passos recomendados
+## O que o MVP valida hoje
 
-1. Migrar este protótipo para Next.js App Router.
-2. Implementar autenticação e multi-tenant com Supabase.
-3. Criar schema SQL inicial para leads, pipeline, tasks e subscriptions.
-4. Adicionar billing com Stripe e analytics de produto.
-5. Conectar a camada de IA para resumos e próxima melhor ação.
+- organização operacional do pipeline;
+- execução diária via follow-ups e tasks;
+- leitura de contexto por lead com resumo, notas e timeline;
+- visão gerencial básica por origem, owner e status;
+- operação em múltiplos workspaces de forma simplificada.
+
+## Próximos passos naturais
+
+- autenticação e sessão;
+- membership real por workspace;
+- permissões por papel;
+- filtros salvos e automações;
+- billing e access model.

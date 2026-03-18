@@ -1,40 +1,42 @@
 # Revenue OS MVP Foundation
 
-## Escopo implementado nesta primeira entrega
+## Evolução desta iteração
 
-Esta entrega cria a fundação visual e estratégica do produto com dois artefatos principais:
+O MVP local agora cobre uma base operacional mais próxima do produto:
 
-1. **Marketing site inicial** para apresentar proposta de valor, ICP, módulos, pricing beta e CTA.
-2. **App shell operacional** com dashboard, lead inbox, pipeline, tasks e bloco de inteligência comercial.
+- time comercial com convites básicos;
+- ownership reutilizado na criação e leitura de leads;
+- filtro por status no lead inbox;
+- timeline de eventos por lead;
+- marcação de ganho/perda com motivo;
+- tasks de follow-up com conclusão;
+- notas persistidas por lead;
+- analytics por origem, owner e status;
+- suporte inicial a workspaces no backend e na UI.
 
-## Decisões desta fase
+## O que isso valida melhor agora
 
-- Estrutura estática para permitir versionamento imediato no GitHub sem depender de registry externa.
-- Design focado em operações high ticket que usam WhatsApp e times pequenos.
-- Conteúdo já orientado a venda para suportar captação de design partners.
+1. **Operação diária comercial** com pipeline, tasks e fila de prioridade.
+2. **Contexto do lead** com notas, timeline e resumo operacional.
+3. **Leitura gerencial simplificada** por owner, origem e status.
+4. **Isolamento básico por workspace** para demonstrar a direção SaaS do produto.
 
-## Roadmap sugerido a partir daqui
+## Limites conhecidos desta fundação
 
-### Fase 1 — Plataforma web
-- Migrar para Next.js App Router
-- Adicionar TypeScript strict
-- Introduzir Tailwind e componentes reutilizáveis
-- Separar marketing site e app shell em rotas reais
+Ainda não existem:
 
-### Fase 2 — Core backend
-- Configurar Supabase Auth
-- Criar schema multi-tenant com accounts, memberships, leads e tasks
-- Aplicar RLS
-- Criar seeds com dados demo
+- autenticação real;
+- membership de usuários por workspace;
+- permissões por papel;
+- convites por email;
+- billing;
+- automações e integrações externas.
 
-### Fase 3 — Produto comercial
-- CRUD de leads
-- Pipeline com persistência
-- Tasks e follow-up
-- Dashboard com KPIs reais
+## Próxima fase sugerida
 
-### Fase 4 — Monetização e IA
-- Stripe Checkout + webhook
-- Billing portal
-- Resumo IA por lead
-- Sugestão de próxima ação
+1. autenticação e sessão;
+2. memberships reais por workspace;
+3. permissões por papel;
+4. filtros avançados e views salvas;
+5. automações comerciais;
+6. billing e access model.
