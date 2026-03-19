@@ -251,6 +251,8 @@ const login = async (form) => {
 const logout = async () => {
   try {
     if (state.authToken) await request('/api/auth/logout', { method: 'POST', body: '{}' })
+  } catch (_) {
+    // Logout local deve sempre prosseguir, mesmo se a sessão remota já expirou.
   } finally {
     clearAuthState()
     clearOperationalState()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import sqlite3
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -1005,7 +1006,9 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def run(host: str = '127.0.0.1', port: int = 3000) -> None:
+def run(host: str | None = None, port: int | None = None) -> None:
+    host = host or os.getenv('HOST', '0.0.0.0')
+    port = port or int(os.getenv('PORT', '3000'))
     init_db()
     server = ThreadingHTTPServer((host, port), RevenueOSHandler)
     print(f'Revenue OS running at http://{host}:{port}')

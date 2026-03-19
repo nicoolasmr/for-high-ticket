@@ -23,6 +23,9 @@ Esta base já cobre:
 - `styles.css`: estilos da landing page e do app.
 - `docs/mvp-foundation.md`: documentação da iteração atual.
 - `tests/test_server.py`: cobertura do backend.
+- `supabase/schema.sql`: schema + seed inicial para aplicar no Supabase/Postgres.
+- `docs/supabase-deploy.md`: checklist prático para a ida a Supabase e deploy.
+- `.env.example`: variáveis de ambiente sugeridas para deploy e conexão futura com Supabase.
 
 ## Principais rotas
 
@@ -52,6 +55,12 @@ Esta base já cobre:
 python server.py
 ```
 
+Também é possível sobrescrever host/porta via ambiente, o que deixa a base pronta para deploy:
+
+```bash
+HOST=0.0.0.0 PORT=3000 python server.py
+```
+
 Depois abra:
 
 - `http://127.0.0.1:3000/` para a landing page;
@@ -64,6 +73,12 @@ Depois abra:
 - leitura de contexto por lead com resumo, notas e timeline;
 - visão gerencial básica por origem, owner e status;
 - operação em múltiplos workspaces com auth demo, memberships ativas/pendentes e isolamento consistente dos dados por workspace.
+
+## Supabase / deploy
+
+- Use `supabase/schema.sql` no SQL Editor para subir o schema inicial em Postgres.
+- Preencha `.env.example` com os dados reais do projeto Supabase.
+- Siga `docs/supabase-deploy.md` para escolher a connection string correta e preparar o deploy.
 
 ## Próximos passos naturais
 

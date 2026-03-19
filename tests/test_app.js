@@ -165,7 +165,7 @@ async function testLogoutClearsLocalStateEvenWhenApiFails() {
   `)
   harness.setFetchQueue([{ ok: false, status: 401, body: { error: 'Unauthorized' } }])
 
-  await harness.call('logout()').catch(() => undefined)
+  await harness.call('logout()')
 
   assert.equal(harness.context.localStorage.getItem('revenue-os-demo-token'), '')
   assert.equal(harness.elements['#workspace-name'].textContent, 'Sem workspace ativo')
