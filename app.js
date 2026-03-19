@@ -249,11 +249,14 @@ const login = async (form) => {
   form.reset()
 }
 const logout = async () => {
-  if (state.authToken) await request('/api/auth/logout', { method: 'POST', body: '{}' })
-  clearAuthState()
-  clearOperationalState()
-  renderInvites()
-  setAuthenticated(false)
+  try {
+    if (state.authToken) await request('/api/auth/logout', { method: 'POST', body: '{}' })
+  } finally {
+    clearAuthState()
+    clearOperationalState()
+    renderInvites()
+    setAuthenticated(false)
+  }
 }
 
 function attachEvents() {

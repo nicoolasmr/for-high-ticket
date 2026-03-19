@@ -152,6 +152,26 @@ async function testInvalidSavedTokenClearsAuthState() {
   assert.equal(harness.elements['#workspace-name'].textContent, 'Sem workspace ativo')
 }
 
+async function testLogoutClearsLocalStateEvenWhenApiFails() {
+  const harness = createHarness({
+    initialStorage: { 'revenue-os-demo-token': 'stale-token' }
+  })
+  await harness.call(`
+    state.authToken = 'stale-token'
+    state.user = { id: 'user-1' }
+    state.workspaces = [{ id: 'ws-default', name: 'High Ticket Labs', role: 'admin' }]
+    state.invites = [{ id: 'ws-default', name: 'High Ticket Labs', role: 'rep', status: 'invited' }]
+    workspaceName.textContent = 'High Ticket Labs'
+  `)
+  harness.setFetchQueue([{ ok: false, status: 401, body: { error: 'Unauthorized' } }])
+
+  await harness.call('logout()').catch(() => undefined)
+
+  assert.equal(harness.context.localStorage.getItem('revenue-os-demo-token'), '')
+  assert.equal(harness.elements['#workspace-name'].textContent, 'Sem workspace ativo')
+  assert.equal(harness.elements['#invite-list'].innerHTML, '')
+}
+
 async function testInviteOnlyLoginSkipsProtectedBoot() {
   const harness = createHarness()
   harness.setFetchQueue([
@@ -210,6 +230,7 @@ async function testActiveWorkspaceLoginBootstrapsAppData() {
 
 Promise.resolve()
   .then(testInvalidSavedTokenClearsAuthState)
+  .then(testLogoutClearsLocalStateEvenWhenApiFails)
   .then(testInviteOnlyLoginSkipsProtectedBoot)
   .then(testActiveWorkspaceLoginBootstrapsAppData)
   .then(() => {
