@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: revenue-os
+  name: revenue-os-local-demo
   labels:
     app: revenue-os
     runtime-profile: local-demo
@@ -28,9 +28,6 @@ spec:
               value: 0.0.0.0
             - name: PORT
               value: "3000"
-          # Este perfil continua em réplica única porque o backend usa SQLite local.
-          # Não escale horizontalmente este Deployment até migrar a persistência para
-          # Postgres/Supabase ou outro banco compartilhado.
           volumeMounts:
             - name: sqlite-data
               mountPath: /data

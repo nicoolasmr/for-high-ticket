@@ -29,9 +29,10 @@ Esta base já cobre:
 - `supabase/indexes.sql`: índices de performance recomendados para a base no Supabase.
 - `supabase/rls.sql`: pacote inicial de RLS/policies para multitenancy e segurança de leitura/escrita.
 - `.env.example`: variáveis de ambiente sugeridas para deploy e conexão futura com Supabase.
-- `Dockerfile` / `.dockerignore`: containerização inicial para deploy.
-- `k8s/`: manifests base de Kubernetes (namespace, config, secret example, deployment, service, ingress).
-- `docs/production-hardening.md`: roadmap operacional para rotas, multitenancy, devops e Kubernetes.
+- `k8s/deployment.yaml`: manifesto padrão para runtime atual, limitado a 1 réplica por usar SQLite local.
+- `k8s/local-demo/deployment.yaml`: perfil explícito para ambientes locais/demo compatíveis com SQLite.
+- `k8s/production/deployment.yaml`: perfil de produção para uso somente após migração para Postgres/Supabase.
+- `docs/production-hardening.md`: guia de hardening com a regra de réplicas e pré-requisitos de produção.
 
 ## Principais rotas
 
@@ -82,12 +83,15 @@ Depois abra:
 
 ## Supabase / deploy
 
+> **Importante:** múltiplas réplicas em Kubernetes só são seguras depois da troca da persistência local em SQLite por um banco compartilhado, como Postgres/Supabase. Até essa migração, use apenas os manifests de perfil `local-demo` ou o `k8s/deployment.yaml` padrão com `replicas: 1`.
+
 - Rode `supabase/schema.sql` no SQL Editor para criar a estrutura.
 - Rode `supabase/seed.sql` em seguida para carregar os dados demo.
 - Rode `supabase/indexes.sql` para criar os índices recomendados.
 - Rode `supabase/rls.sql` para habilitar RLS e as policies iniciais.
 - Preencha `.env.example` com os dados reais do projeto Supabase.
 - Siga `docs/supabase-deploy.md` para escolher a connection string correta e preparar o deploy.
+- Consulte `docs/production-hardening.md` antes de publicar em Kubernetes ou aumentar `replicas`.
 
 ## Plataforma / produção
 
