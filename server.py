@@ -4,6 +4,7 @@ import json
 import hashlib
 import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -795,6 +796,7 @@ def fetch_analytics(conn: sqlite3.Connection, workspace_id: str = 'ws-default') 
 
 class RevenueOSHandler(SimpleHTTPRequestHandler):
     request_id: str
+    request_started_at: float
 
     def __init__(self, *args, directory: str | None = None, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
@@ -808,6 +810,7 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         self.request_id = uuid4().hex
+        self.request_started_at = time.perf_counter()
         parsed = urlparse(self.path)
         if parsed.path.startswith('/api/'):
             self.handle_api_get(parsed)
@@ -820,6 +823,7 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         self.request_id = uuid4().hex
+        self.request_started_at = time.perf_counter()
         parsed = urlparse(self.path)
         if not parsed.path.startswith('/api/'):
             self.write_json({'error': 'Not found'}, status=404)
@@ -828,6 +832,7 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
 
     def do_PATCH(self) -> None:
         self.request_id = uuid4().hex
+        self.request_started_at = time.perf_counter()
         parsed = urlparse(self.path)
         if not parsed.path.startswith('/api/'):
             self.write_json({'error': 'Not found'}, status=404)
@@ -1045,9 +1050,37 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                 return self.write_json(task if task else {'error': 'Task not found'}, status=200 if task else 404)
         self.write_json({'error': 'Not found'}, status=404)
 
+
+    def default_error_code(self, status: int) -> str:
+        return {
+            400: 'bad_request',
+            401: 'unauthorized',
+            403: 'forbidden',
+            404: 'not_found',
+            409: 'conflict',
+            422: 'validation_error',
+        }.get(status, 'error')
+
+    def log_api_response(self, status: int, request_id: str) -> None:
+        if os.getenv('REVENUE_OS_DISABLE_API_LOGS') == '1':
+            return
+        started_at = getattr(self, 'request_started_at', None)
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 2) if started_at else None
+        print(json.dumps({
+            'requestId': request_id,
+            'method': self.command,
+            'path': self.path,
+            'status': status,
+            'durationMs': duration_ms,
+        }), flush=True)
+
     def write_json(self, payload: dict, status: int = 200) -> None:
-        if isinstance(payload, dict) and 'requestId' not in payload:
-            payload = {**payload, 'requestId': getattr(self, 'request_id', uuid4().hex)}
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            if 'requestId' not in payload:
+                payload['requestId'] = getattr(self, 'request_id', uuid4().hex)
+            if 'error' in payload and 'code' not in payload:
+                payload['code'] = self.default_error_code(status)
         body = json.dumps(payload).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -1055,6 +1088,7 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
         self.send_header('X-Request-Id', payload.get('requestId', getattr(self, 'request_id', '')))
         self.end_headers()
         self.wfile.write(body)
+        self.log_api_response(status, payload.get('requestId', getattr(self, 'request_id', '')))
 
 
 def run(host: str | None = None, port: int | None = None) -> None:

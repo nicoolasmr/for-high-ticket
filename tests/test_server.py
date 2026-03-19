@@ -1,10 +1,13 @@
 from http.client import HTTPConnection
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 from threading import Thread
 import unittest
+
+os.environ['REVENUE_OS_DISABLE_API_LOGS'] = '1'
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -195,6 +198,7 @@ class RevenueOSHttpTestCase(unittest.TestCase):
         status, payload = self.request('GET', '/api/dashboard?workspace=ws-default')
         self.assertEqual(status, 401)
         self.assertEqual(payload['error'], 'Unauthorized')
+        self.assertEqual(payload['code'], 'unauthorized')
 
     def test_workspaces_require_authentication(self):
         status, payload = self.request('GET', '/api/workspaces')
@@ -218,12 +222,14 @@ class RevenueOSHttpTestCase(unittest.TestCase):
         status, payload = self.request('GET', '/api/leads?workspace=ws-default&limit=abc', token=self.session['token'])
         self.assertEqual(status, 422)
         self.assertEqual(payload['error'], 'limit must be an integer')
+        self.assertEqual(payload['code'], 'validation_error')
         self.assertTrue(payload['requestId'])
 
     def test_cross_workspace_lead_summary_is_forbidden(self):
         status, payload = self.request('GET', '/api/leads/lead-3/summary', token=self.session['token'])
         self.assertEqual(status, 403)
         self.assertEqual(payload['error'], 'Forbidden')
+        self.assertEqual(payload['code'], 'forbidden')
 
     def test_rep_cannot_access_analytics(self):
         status, payload = self.request('GET', '/api/analytics?workspace=ws-default', token=self.rep_session['token'])
