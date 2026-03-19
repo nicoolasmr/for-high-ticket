@@ -26,6 +26,8 @@ Esta base já cobre:
 - `supabase/schema.sql`: schema PostgreSQL base para Supabase/Postgres.
 - `supabase/seed.sql`: seed inicial do MVP para carregar no projeto Supabase.
 - `docs/supabase-deploy.md`: checklist prático para a ida a Supabase e deploy.
+- `supabase/indexes.sql`: índices de performance recomendados para a base no Supabase.
+- `supabase/rls.sql`: pacote inicial de RLS/policies para multitenancy e segurança de leitura/escrita.
 - `.env.example`: variáveis de ambiente sugeridas para deploy e conexão futura com Supabase.
 
 ## Principais rotas
@@ -79,6 +81,8 @@ Depois abra:
 
 - Rode `supabase/schema.sql` no SQL Editor para criar a estrutura.
 - Rode `supabase/seed.sql` em seguida para carregar os dados demo.
+- Rode `supabase/indexes.sql` para criar os índices recomendados.
+- Rode `supabase/rls.sql` para habilitar RLS e as policies iniciais.
 - Preencha `.env.example` com os dados reais do projeto Supabase.
 - Siga `docs/supabase-deploy.md` para escolher a connection string correta e preparar o deploy.
 
