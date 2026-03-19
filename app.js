@@ -188,8 +188,13 @@ async function loadLeads() {
   next.searchParams.set('status', state.status)
   const payload = await request(`${next.pathname}?${next.searchParams.toString().replace(/^workspace=[^&]*&?/, '')}`)
   state.leads = payload.items
-  if (!state.selectedLeadId && state.leads[0]) state.selectedLeadId = state.leads[0].id
+  if (!state.leads.some((lead) => lead.id === state.selectedLeadId)) state.selectedLeadId = state.leads[0]?.id || null
   leadsTableBody.innerHTML = state.leads.map((lead) => `<tr><td><button class="table-lead-button" data-select-lead="${lead.id}"><strong>${lead.name}</strong><div class="table-sub">${lead.company} · ${lead.source}</div></button></td><td><select class="stage-select" data-stage-select="${lead.id}">${stageOptions(lead.stageId)}</select></td><td>${lead.owner}</td><td><span class="temp temp-${lead.temperature}">${lead.temperature}</span></td><td>${lead.nextAction}</td><td>${currency.format(lead.value)}</td><td>${lead.status}${lead.lostReason ? `<div class="table-sub">${lead.lostReason}</div>` : ''}</td></tr>`).join('')
+  if (!state.selectedLeadId) {
+    aiSummary.innerHTML = ''
+    notesList.innerHTML = ''
+    timelineList.innerHTML = ''
+  }
 }
 
 async function loadSummary(leadId) { if (!leadId) return; const lead = await request(`/api/leads/${leadId}/summary`); aiSummary.innerHTML = `<div class="summary-block"><span class="eyebrow">${lead.name} · ${lead.company}</span><p>${lead.text}</p><p><strong>Status:</strong> ${lead.status}${lead.lostReason ? ` · ${lead.lostReason}` : ''}</p><div class="summary-columns"><div><strong>Objeções</strong><ul>${lead.objections.map((item) => `<li>${item}</li>`).join('')}</ul></div><div><strong>Sinais de compra</strong><ul>${lead.signals.map((item) => `<li>${item}</li>`).join('')}</ul></div></div><p><strong>Próxima melhor ação:</strong> ${lead.nextBestAction}</p><blockquote>${lead.suggestedReply}</blockquote></div>` }
@@ -232,6 +237,7 @@ const markLeadWon = async () => { if (!state.selectedLeadId) return; await reque
 const markLeadLost = async () => { if (!state.selectedLeadId) return; const lostReason = window.prompt('Qual o motivo da perda?') || 'Sem motivo informado'; await request(`/api/leads/${state.selectedLeadId}/mark-lost`, { method: 'POST', body: JSON.stringify({ lostReason }) }); await refreshOperationalViews() }
 const inviteTeamMember = async (form) => { const payload = Object.fromEntries(new FormData(form).entries()); payload.workspaceId = state.workspaceId; const member = await request('/api/team', { method: 'POST', body: JSON.stringify(payload) }); await loadTeam(); form.reset(); teamFormFeedback.textContent = `Convite criado para ${member.name}.` }
 const acceptInvite = async (workspaceId) => {
+  state.workspaceId = workspaceId
   await request('/api/team/accept-invite', { method: 'POST', body: JSON.stringify({ workspaceId }) })
   const session = await request('/api/auth/me')
   if (applySession(session)) await loadAppData()
