@@ -21,7 +21,7 @@ function createElement(overrides = {}) {
   }
 }
 
-function createHarness() {
+function createHarness({ initialStorage = {}, initialFetchQueue = [] } = {}) {
   const elements = {
     '#auth-shell': createElement(),
     '#app-shell': createElement(),
@@ -71,8 +71,8 @@ function createHarness() {
   const viewStacks = [createElement({ id: 'dashboard-view' })]
   const body = createElement()
   const fetchCalls = []
-  let fetchQueue = []
-  const storage = new Map()
+  let fetchQueue = initialFetchQueue.slice()
+  const storage = new Map(Object.entries(initialStorage))
 
   const context = {
     console,
@@ -129,8 +129,47 @@ function createHarness() {
     },
     async call(expression) {
       return vm.runInContext(expression, context)
+    },
+    async settle() {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, 0))
     }
   }
+}
+
+async function testInvalidSavedTokenClearsAuthState() {
+  const harness = createHarness({
+    initialStorage: { 'revenue-os-demo-token': 'stale-token' },
+    initialFetchQueue: [{ ok: false, status: 401, body: { error: 'Unauthorized' } }]
+  })
+
+  await harness.settle()
+
+  assert.equal(harness.fetchCalls.length, 1)
+  assert.match(harness.fetchCalls[0].url, /\/api\/auth\/me/)
+  assert.equal(harness.context.localStorage.getItem('revenue-os-demo-token'), '')
+  assert.equal(harness.elements['#login-feedback'].textContent, 'Faça login com uma credencial demo para abrir o app.')
+  assert.equal(harness.elements['#workspace-name'].textContent, 'Sem workspace ativo')
+}
+
+async function testLogoutClearsLocalStateEvenWhenApiFails() {
+  const harness = createHarness({
+    initialStorage: { 'revenue-os-demo-token': 'stale-token' }
+  })
+  await harness.call(`
+    state.authToken = 'stale-token'
+    state.user = { id: 'user-1' }
+    state.workspaces = [{ id: 'ws-default', name: 'High Ticket Labs', role: 'admin' }]
+    state.invites = [{ id: 'ws-default', name: 'High Ticket Labs', role: 'rep', status: 'invited' }]
+    workspaceName.textContent = 'High Ticket Labs'
+  `)
+  harness.setFetchQueue([{ ok: false, status: 401, body: { error: 'Unauthorized' } }])
+
+  await harness.call('logout()').catch(() => undefined)
+
+  assert.equal(harness.context.localStorage.getItem('revenue-os-demo-token'), '')
+  assert.equal(harness.elements['#workspace-name'].textContent, 'Sem workspace ativo')
+  assert.equal(harness.elements['#invite-list'].innerHTML, '')
 }
 
 async function testInviteOnlyLoginSkipsProtectedBoot() {
@@ -190,6 +229,8 @@ async function testActiveWorkspaceLoginBootstrapsAppData() {
 }
 
 Promise.resolve()
+  .then(testInvalidSavedTokenClearsAuthState)
+  .then(testLogoutClearsLocalStateEvenWhenApiFails)
   .then(testInviteOnlyLoginSkipsProtectedBoot)
   .then(testActiveWorkspaceLoginBootstrapsAppData)
   .then(() => {

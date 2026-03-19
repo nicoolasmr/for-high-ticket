@@ -110,6 +110,14 @@ function hasActiveWorkspace() {
   return Boolean(state.workspaces.length && state.workspaceId)
 }
 
+function clearAuthState() {
+  state.authToken = ''
+  state.user = null
+  state.workspaces = []
+  state.invites = []
+  localStorage.removeItem(authTokenKey)
+}
+
 function clearOperationalState() {
   state.workspaceId = ''
   state.selectedLeadId = null
@@ -241,15 +249,14 @@ const login = async (form) => {
   form.reset()
 }
 const logout = async () => {
-  if (state.authToken) await request('/api/auth/logout', { method: 'POST', body: '{}' })
-  state.authToken = ''
-  state.user = null
-  state.workspaces = []
-  state.invites = []
-  localStorage.removeItem(authTokenKey)
-  clearOperationalState()
-  renderInvites()
-  setAuthenticated(false)
+  try {
+    if (state.authToken) await request('/api/auth/logout', { method: 'POST', body: '{}' })
+  } finally {
+    clearAuthState()
+    clearOperationalState()
+    renderInvites()
+    setAuthenticated(false)
+  }
 }
 
 function attachEvents() {
@@ -286,6 +293,7 @@ async function init() {
     if (!hasSession) return
     await loadAppData()
   } catch (error) {
+    clearAuthState()
     clearOperationalState()
     setAuthenticated(false)
     loginFeedback.textContent = 'Faça login com uma credencial demo para abrir o app.'
