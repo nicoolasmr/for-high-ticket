@@ -23,8 +23,11 @@ Esta base já cobre:
 - `styles.css`: estilos da landing page e do app.
 - `docs/mvp-foundation.md`: documentação da iteração atual.
 - `tests/test_server.py`: cobertura do backend.
-- `supabase/schema.sql`: schema + seed inicial para aplicar no Supabase/Postgres.
+- `supabase/schema.sql`: schema PostgreSQL base para Supabase/Postgres.
+- `supabase/seed.sql`: seed inicial do MVP para carregar no projeto Supabase.
 - `docs/supabase-deploy.md`: checklist prático para a ida a Supabase e deploy.
+- `supabase/indexes.sql`: índices de performance recomendados para a base no Supabase.
+- `supabase/rls.sql`: pacote inicial de RLS/policies para multitenancy e segurança de leitura/escrita.
 - `.env.example`: variáveis de ambiente sugeridas para deploy e conexão futura com Supabase.
 
 ## Principais rotas
@@ -76,7 +79,10 @@ Depois abra:
 
 ## Supabase / deploy
 
-- Use `supabase/schema.sql` no SQL Editor para subir o schema inicial em Postgres.
+- Rode `supabase/schema.sql` no SQL Editor para criar a estrutura.
+- Rode `supabase/seed.sql` em seguida para carregar os dados demo.
+- Rode `supabase/indexes.sql` para criar os índices recomendados.
+- Rode `supabase/rls.sql` para habilitar RLS e as policies iniciais.
 - Preencha `.env.example` com os dados reais do projeto Supabase.
 - Siga `docs/supabase-deploy.md` para escolher a connection string correta e preparar o deploy.
 
