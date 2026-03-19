@@ -4,6 +4,7 @@ import json
 import hashlib
 import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -121,8 +122,6 @@ SEED_TASKS = [
     ('ws-default', 'lead-4', '18:00', 'Primeira resposta para Juliana Costa', 'high', 0),
 ]
 
-SEED_TEAM = [('ws-default', 'Carla', 'manager'), ('ws-default', 'Marcos', 'rep'), ('ws-default', 'Rafa', 'rep'), ('ws-clinics', 'Bruna', 'manager')]
-
 SEED_ONBOARDING = [
     ('ws-default', 'Definir nome do workspace', 1),
     ('ws-default', 'Configurar pipeline padrão', 1),
@@ -216,7 +215,7 @@ def init_db(db_path: Path | None = None) -> None:
 
             create table if not exists tasks (
                 id integer primary key autoincrement,
-                workspace_id text references workspaces(id),
+                workspace_id text not null references workspaces(id),
                 lead_id text references leads(id),
                 due_time text not null,
                 title text not null,
@@ -224,16 +223,9 @@ def init_db(db_path: Path | None = None) -> None:
                 completed integer not null default 0
             );
 
-            create table if not exists team_members (
-                id integer primary key autoincrement,
-                workspace_id text not null references workspaces(id),
-                name text not null,
-                role text not null
-            );
-
             create table if not exists onboarding_steps (
                 id integer primary key autoincrement,
-                workspace_id text references workspaces(id),
+                workspace_id text not null references workspaces(id),
                 title text not null,
                 done integer not null
             );
@@ -255,8 +247,9 @@ def init_db(db_path: Path | None = None) -> None:
             );
             '''
         )
+        conn.execute('drop table if exists team_members')
         if not has_column(conn, 'tasks', 'workspace_id'):
-            conn.execute('alter table tasks add column workspace_id text references workspaces(id)')
+            conn.execute("alter table tasks add column workspace_id text not null default 'ws-default' references workspaces(id)")
             conn.execute(
                 '''
                 update tasks
@@ -269,7 +262,7 @@ def init_db(db_path: Path | None = None) -> None:
                 '''
             )
         if not has_column(conn, 'onboarding_steps', 'workspace_id'):
-            conn.execute('alter table onboarding_steps add column workspace_id text references workspaces(id)')
+            conn.execute("alter table onboarding_steps add column workspace_id text not null default 'ws-default' references workspaces(id)")
             conn.execute("update onboarding_steps set workspace_id = 'ws-default' where workspace_id is null")
         if not has_column(conn, 'workspace_memberships', 'status'):
             conn.execute("alter table workspace_memberships add column status text not null default 'active'")
@@ -331,7 +324,6 @@ def seed_db(conn: sqlite3.Connection) -> None:
             for lead in SEED_LEADS
         ],
     )
-    conn.executemany('insert into team_members (workspace_id, name, role) values (?, ?, ?)', SEED_TEAM)
     conn.executemany('insert into tasks (workspace_id, lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?, ?)', SEED_TASKS)
     conn.executemany('insert into onboarding_steps (workspace_id, title, done) values (?, ?, ?)', SEED_ONBOARDING)
     for lead_id, author, body in SEED_NOTES:
@@ -342,7 +334,7 @@ def seed_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def fetch_leads(conn: sqlite3.Connection, workspace_id: str = 'ws-default', search: str = '', owner: str = 'all', temperature: str = 'all', status: str = 'all') -> list[dict]:
+def fetch_leads(conn: sqlite3.Connection, workspace_id: str = 'ws-default', search: str = '', owner: str = 'all', temperature: str = 'all', status: str = 'all', limit: int | None = None, offset: int = 0) -> list[dict]:
     query = '''
         select leads.*, stages.name as stage_name
         from leads
@@ -354,8 +346,28 @@ def fetch_leads(conn: sqlite3.Connection, workspace_id: str = 'ws-default', sear
           and (? = 'all' or lower(leads.status) like '%' || lower(?) || '%')
         order by leads.last_reply_hours desc, leads.value desc
     '''
-    rows = conn.execute(query, (workspace_id, search, search, owner, owner, temperature, temperature, status, status)).fetchall()
+    params = [workspace_id, search, search, owner, owner, temperature, temperature, status, status]
+    if limit is not None:
+        query += ' limit ? offset ?'
+        params.extend([limit, offset])
+    rows = conn.execute(query, tuple(params)).fetchall()
     return [serialize_lead(row) for row in rows]
+
+
+def count_leads(conn: sqlite3.Connection, workspace_id: str = 'ws-default', search: str = '', owner: str = 'all', temperature: str = 'all', status: str = 'all') -> int:
+    row = conn.execute(
+        '''
+        select count(*) as count
+        from leads
+        where leads.workspace_id = ?
+          and (? = '' or lower(leads.name || ' ' || leads.company || ' ' || leads.source) like '%' || lower(?) || '%')
+          and (? = 'all' or leads.owner = ?)
+          and (? = 'all' or leads.temperature = ?)
+          and (? = 'all' or lower(leads.status) like '%' || lower(?) || '%')
+        ''',
+        (workspace_id, search, search, owner, owner, temperature, temperature, status, status),
+    ).fetchone()
+    return row['count']
 
 
 def serialize_lead(row: sqlite3.Row) -> dict:
@@ -774,6 +786,9 @@ def fetch_analytics(conn: sqlite3.Connection, workspace_id: str = 'ws-default') 
 
 
 class RevenueOSHandler(SimpleHTTPRequestHandler):
+    request_id: str
+    request_started_at: float
+
     def __init__(self, *args, directory: str | None = None, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
@@ -785,6 +800,8 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
         return
 
     def do_GET(self) -> None:
+        self.request_id = uuid4().hex
+        self.request_started_at = time.perf_counter()
         parsed = urlparse(self.path)
         if parsed.path.startswith('/api/'):
             self.handle_api_get(parsed)
@@ -796,6 +813,8 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
+        self.request_id = uuid4().hex
+        self.request_started_at = time.perf_counter()
         parsed = urlparse(self.path)
         if not parsed.path.startswith('/api/'):
             self.write_json({'error': 'Not found'}, status=404)
@@ -803,6 +822,8 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
         self.handle_api_write(parsed, method='POST')
 
     def do_PATCH(self) -> None:
+        self.request_id = uuid4().hex
+        self.request_started_at = time.perf_counter()
         parsed = urlparse(self.path)
         if not parsed.path.startswith('/api/'):
             self.write_json({'error': 'Not found'}, status=404)
@@ -823,6 +844,18 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
     def require_session(self, conn: sqlite3.Connection) -> dict | None:
         token = self.read_bearer_token()
         return fetch_session(conn, token) if token else None
+
+    def parse_non_negative_int(self, raw_value: str | None, field_name: str, default: int | None = None) -> int | None:
+        if raw_value in (None, ''):
+            return default
+        try:
+            value = int(raw_value)
+        except ValueError as exc:
+            raise ValueError(f'{field_name} must be an integer') from exc
+        if value < 0:
+            raise ValueError(f'{field_name} must be >= 0')
+        return value
+
 
     def handle_api_get(self, parsed) -> None:
         params = parse_qs(parsed.query)
@@ -854,7 +887,18 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
             if parsed.path == '/api/dashboard':
                 return self.write_json(fetch_dashboard(conn, workspace_id))
             if parsed.path == '/api/leads':
-                return self.write_json({'items': fetch_leads(conn, workspace_id=workspace_id, search=params.get('search', [''])[0], owner=params.get('owner', ['all'])[0], temperature=params.get('temperature', ['all'])[0], status=params.get('status', ['all'])[0])})
+                search = params.get('search', [''])[0]
+                owner = params.get('owner', ['all'])[0]
+                temperature = params.get('temperature', ['all'])[0]
+                status = params.get('status', ['all'])[0]
+                try:
+                    limit = self.parse_non_negative_int(params.get('limit', [None])[0], 'limit')
+                    offset = self.parse_non_negative_int(params.get('offset', [None])[0], 'offset', 0) or 0
+                except ValueError as error:
+                    return self.write_json({'error': str(error)}, status=422)
+                total = count_leads(conn, workspace_id=workspace_id, search=search, owner=owner, temperature=temperature, status=status)
+                items = fetch_leads(conn, workspace_id=workspace_id, search=search, owner=owner, temperature=temperature, status=status, limit=limit, offset=offset)
+                return self.write_json({'items': items, 'meta': {'total': total, 'limit': limit, 'offset': offset}})
             if parsed.path.startswith('/api/leads/') and parsed.path.endswith('/summary'):
                 lead_id = parsed.path.split('/')[3]
                 lead_workspace_id = fetch_lead_workspace(conn, lead_id)
@@ -997,13 +1041,45 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                 return self.write_json(task if task else {'error': 'Task not found'}, status=200 if task else 404)
         self.write_json({'error': 'Not found'}, status=404)
 
+
+    def default_error_code(self, status: int) -> str:
+        return {
+            400: 'bad_request',
+            401: 'unauthorized',
+            403: 'forbidden',
+            404: 'not_found',
+            409: 'conflict',
+            422: 'validation_error',
+        }.get(status, 'error')
+
+    def log_api_response(self, status: int, request_id: str) -> None:
+        if os.getenv('REVENUE_OS_DISABLE_API_LOGS') == '1':
+            return
+        started_at = getattr(self, 'request_started_at', None)
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 2) if started_at else None
+        print(json.dumps({
+            'requestId': request_id,
+            'method': self.command,
+            'path': self.path,
+            'status': status,
+            'durationMs': duration_ms,
+        }), flush=True)
+
     def write_json(self, payload: dict, status: int = 200) -> None:
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            if 'requestId' not in payload:
+                payload['requestId'] = getattr(self, 'request_id', uuid4().hex)
+            if 'error' in payload and 'code' not in payload:
+                payload['code'] = self.default_error_code(status)
         body = json.dumps(payload).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
+        self.send_header('X-Request-Id', payload.get('requestId', getattr(self, 'request_id', '')))
         self.end_headers()
         self.wfile.write(body)
+        self.log_api_response(status, payload.get('requestId', getattr(self, 'request_id', '')))
 
 
 def run(host: str | None = None, port: int | None = None) -> None:

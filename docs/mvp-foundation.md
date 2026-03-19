@@ -4,7 +4,7 @@
 
 O MVP local agora cobre uma base operacional mais próxima do produto:
 
-- time comercial com memberships, convites locais e aceite no app;
+- time comercial modelado por `users` + `workspace_memberships`, com convites locais e aceite no app;
 - ownership reutilizado na criação e leitura de leads;
 - filtro por status no lead inbox;
 - timeline de eventos por lead;
@@ -22,6 +22,14 @@ O MVP local agora cobre uma base operacional mais próxima do produto:
 2. **Contexto do lead** com notas, timeline e resumo operacional.
 3. **Leitura gerencial simplificada** por owner, origem e status.
 4. **Isolamento básico por workspace** para demonstrar a direção SaaS do produto.
+
+## Papéis de cada conceito no schema
+
+- **time**: conjunto de usuários vinculados a um workspace por `workspace_memberships`;
+- **convite**: uma membership com `status = 'invited'`, ainda sem acesso operacional ativo;
+- **membership**: o vínculo entre `users` e `workspaces`, contendo papel (`role`) e estado (`status`).
+
+Com isso, não existe uma tabela paralela para representar membros do time: a fonte de verdade é sempre `users` + `workspace_memberships`.
 
 ## Limites conhecidos desta fundação
 

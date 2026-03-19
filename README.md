@@ -29,6 +29,10 @@ Esta base já cobre:
 - `supabase/indexes.sql`: índices de performance recomendados para a base no Supabase.
 - `supabase/rls.sql`: pacote inicial de RLS/policies para multitenancy e segurança de leitura/escrita.
 - `.env.example`: variáveis de ambiente sugeridas para deploy e conexão futura com Supabase.
+- `k8s/deployment.yaml`: manifesto padrão para runtime atual, limitado a 1 réplica por usar SQLite local.
+- `k8s/local-demo/deployment.yaml`: perfil explícito para ambientes locais/demo compatíveis com SQLite.
+- `k8s/production/deployment.yaml`: perfil de produção para uso somente após migração para Postgres/Supabase.
+- `docs/production-hardening.md`: guia de hardening com a regra de réplicas e pré-requisitos de produção.
 
 ## Principais rotas
 
@@ -77,7 +81,18 @@ Depois abra:
 - visão gerencial básica por origem, owner e status;
 - operação em múltiplos workspaces com auth demo, memberships ativas/pendentes e isolamento consistente dos dados por workspace.
 
+## Modelagem de time e convites
+
+- `users` representa a identidade da pessoa.
+- `workspace_memberships` representa o vínculo dessa pessoa com um workspace, incluindo `role` e `status`.
+- `status = 'invited'` representa convite pendente.
+- `status = 'active'` representa membro ativo do time naquele workspace.
+
+Assim, o produto usa uma única fonte de verdade para time e convites: `users` + `workspace_memberships`.
+
 ## Supabase / deploy
+
+> **Importante:** múltiplas réplicas em Kubernetes só são seguras depois da troca da persistência local em SQLite por um banco compartilhado, como Postgres/Supabase. Até essa migração, use apenas os manifests de perfil `local-demo` ou o `k8s/deployment.yaml` padrão com `replicas: 1`.
 
 - Rode `supabase/schema.sql` no SQL Editor para criar a estrutura.
 - Rode `supabase/seed.sql` em seguida para carregar os dados demo.
@@ -85,6 +100,13 @@ Depois abra:
 - Rode `supabase/rls.sql` para habilitar RLS e as policies iniciais.
 - Preencha `.env.example` com os dados reais do projeto Supabase.
 - Siga `docs/supabase-deploy.md` para escolher a connection string correta e preparar o deploy.
+- Consulte `docs/production-hardening.md` antes de publicar em Kubernetes ou aumentar `replicas`.
+
+## Plataforma / produção
+
+- Use `Dockerfile` e `.dockerignore` como base para build da imagem.
+- Ajuste os manifests em `k8s/` com imagem, domínio e secrets reais.
+- Siga `docs/production-hardening.md` para a ordem de evolução: rotas, multitenancy, devops e Kubernetes.
 
 ## Próximos passos naturais
 

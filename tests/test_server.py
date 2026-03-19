@@ -1,10 +1,13 @@
 from http.client import HTTPConnection
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 from threading import Thread
 import unittest
+
+os.environ['REVENUE_OS_DISABLE_API_LOGS'] = '1'
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -43,6 +46,12 @@ class RevenueOSTestCase(unittest.TestCase):
         leads = server.fetch_leads(self.conn, workspace_id='ws-clinics', owner='Carla', temperature='hot', status='proposta')
         ids = {lead['id'] for lead in leads}
         self.assertEqual(ids, {'lead-3'})
+
+    def test_fetch_leads_supports_pagination(self):
+        leads = server.fetch_leads(self.conn, workspace_id='ws-default', limit=2, offset=1)
+        self.assertEqual(len(leads), 2)
+        self.assertEqual([lead['id'] for lead in leads], ['lead-2', 'lead-4'])
+        self.assertEqual(server.count_leads(self.conn, workspace_id='ws-default'), 3)
 
     def test_summary_exists(self):
         summary = server.fetch_summary(self.conn, 'lead-1')
@@ -108,6 +117,12 @@ class RevenueOSTestCase(unittest.TestCase):
         self.assertEqual(membership['role'], 'rep')
         self.assertTrue(server.role_allows('admin', ('admin', 'manager')))
         self.assertFalse(server.role_allows('rep', ('admin', 'manager')))
+
+    def test_sqlite_schema_does_not_keep_team_members_table(self):
+        row = self.conn.execute(
+            "select name from sqlite_master where type = 'table' and name = 'team_members'"
+        ).fetchone()
+        self.assertIsNone(row)
 
     def test_create_and_fetch_note(self):
         note = server.create_note(self.conn, 'lead-1', {'author': 'Carla', 'body': 'Lead pediu validação de ROI.'})
@@ -189,6 +204,7 @@ class RevenueOSHttpTestCase(unittest.TestCase):
         status, payload = self.request('GET', '/api/dashboard?workspace=ws-default')
         self.assertEqual(status, 401)
         self.assertEqual(payload['error'], 'Unauthorized')
+        self.assertEqual(payload['code'], 'unauthorized')
 
     def test_workspaces_require_authentication(self):
         status, payload = self.request('GET', '/api/workspaces')
@@ -201,10 +217,25 @@ class RevenueOSHttpTestCase(unittest.TestCase):
         priorities_kpi = next(item for item in payload['kpis'] if item['label'] == 'Tasks prioritárias')
         self.assertEqual(priorities_kpi['value'], 3)
 
+    def test_leads_endpoint_returns_meta_and_request_id(self):
+        status, payload = self.request('GET', '/api/leads?workspace=ws-default&limit=2&offset=1', token=self.session['token'])
+        self.assertEqual(status, 200)
+        self.assertEqual(payload['meta'], {'total': 3, 'limit': 2, 'offset': 1})
+        self.assertEqual([item['id'] for item in payload['items']], ['lead-2', 'lead-4'])
+        self.assertTrue(payload['requestId'])
+
+    def test_leads_endpoint_validates_limit_param(self):
+        status, payload = self.request('GET', '/api/leads?workspace=ws-default&limit=abc', token=self.session['token'])
+        self.assertEqual(status, 422)
+        self.assertEqual(payload['error'], 'limit must be an integer')
+        self.assertEqual(payload['code'], 'validation_error')
+        self.assertTrue(payload['requestId'])
+
     def test_cross_workspace_lead_summary_is_forbidden(self):
         status, payload = self.request('GET', '/api/leads/lead-3/summary', token=self.session['token'])
         self.assertEqual(status, 403)
         self.assertEqual(payload['error'], 'Forbidden')
+        self.assertEqual(payload['code'], 'forbidden')
 
     def test_rep_cannot_access_analytics(self):
         status, payload = self.request('GET', '/api/analytics?workspace=ws-default', token=self.rep_session['token'])

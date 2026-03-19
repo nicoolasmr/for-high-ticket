@@ -1,0 +1,10 @@
+.git
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+revenue_os.db
+.env
+.venv/
+node_modules/

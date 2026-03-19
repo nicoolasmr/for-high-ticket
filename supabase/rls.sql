@@ -71,7 +71,6 @@ alter table public.workspace_memberships enable row level security;
 alter table public.stages enable row level security;
 alter table public.leads enable row level security;
 alter table public.tasks enable row level security;
-alter table public.team_members enable row level security;
 alter table public.onboarding_steps enable row level security;
 alter table public.notes enable row level security;
 alter table public.events enable row level security;
@@ -160,19 +159,6 @@ on public.tasks
 for update
 using (public.has_workspace_access(workspace_id, array['active']))
 with check (public.has_workspace_access(workspace_id, array['active']));
-
-drop policy if exists "team_select_same_workspace" on public.team_members;
-create policy "team_select_same_workspace"
-on public.team_members
-for select
-using (public.has_workspace_access(workspace_id, array['active']));
-
-drop policy if exists "team_manage_admin_or_manager" on public.team_members;
-create policy "team_manage_admin_or_manager"
-on public.team_members
-for all
-using (public.has_workspace_role(workspace_id, array['admin', 'manager']))
-with check (public.has_workspace_role(workspace_id, array['admin', 'manager']));
 
 drop policy if exists "onboarding_select_same_workspace" on public.onboarding_steps;
 create policy "onboarding_select_same_workspace"
