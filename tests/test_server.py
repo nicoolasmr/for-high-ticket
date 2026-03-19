@@ -118,6 +118,12 @@ class RevenueOSTestCase(unittest.TestCase):
         self.assertTrue(server.role_allows('admin', ('admin', 'manager')))
         self.assertFalse(server.role_allows('rep', ('admin', 'manager')))
 
+    def test_sqlite_schema_does_not_keep_team_members_table(self):
+        row = self.conn.execute(
+            "select name from sqlite_master where type = 'table' and name = 'team_members'"
+        ).fetchone()
+        self.assertIsNone(row)
+
     def test_create_and_fetch_note(self):
         note = server.create_note(self.conn, 'lead-1', {'author': 'Carla', 'body': 'Lead pediu validação de ROI.'})
         self.assertEqual(note['author'], 'Carla')

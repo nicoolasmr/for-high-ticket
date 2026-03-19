@@ -62,13 +62,6 @@ create table if not exists public.tasks (
   completed boolean not null default false
 );
 
-create table if not exists public.team_members (
-  id bigint generated always as identity primary key,
-  workspace_id text not null references public.workspaces(id) on delete cascade,
-  name text not null,
-  role text not null
-);
-
 create table if not exists public.onboarding_steps (
   id bigint generated always as identity primary key,
   workspace_id text references public.workspaces(id) on delete cascade,

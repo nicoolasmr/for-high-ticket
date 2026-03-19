@@ -81,6 +81,15 @@ Depois abra:
 - visão gerencial básica por origem, owner e status;
 - operação em múltiplos workspaces com auth demo, memberships ativas/pendentes e isolamento consistente dos dados por workspace.
 
+## Modelagem de time e convites
+
+- `users` representa a identidade da pessoa.
+- `workspace_memberships` representa o vínculo dessa pessoa com um workspace, incluindo `role` e `status`.
+- `status = 'invited'` representa convite pendente.
+- `status = 'active'` representa membro ativo do time naquele workspace.
+
+Assim, o produto usa uma única fonte de verdade para time e convites: `users` + `workspace_memberships`.
+
 ## Supabase / deploy
 
 > **Importante:** múltiplas réplicas em Kubernetes só são seguras depois da troca da persistência local em SQLite por um banco compartilhado, como Postgres/Supabase. Até essa migração, use apenas os manifests de perfil `local-demo` ou o `k8s/deployment.yaml` padrão com `replicas: 1`.

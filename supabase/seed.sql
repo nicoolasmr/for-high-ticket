@@ -49,14 +49,6 @@ values
   ('ws-default', 'lead-4', '18:00', 'Primeira resposta para Juliana Costa', 'high', false)
 on conflict do nothing;
 
-insert into public.team_members (workspace_id, name, role)
-values
-  ('ws-default', 'Carla', 'manager'),
-  ('ws-default', 'Marcos', 'rep'),
-  ('ws-default', 'Rafa', 'rep'),
-  ('ws-clinics', 'Bruna', 'manager')
-on conflict do nothing;
-
 insert into public.onboarding_steps (workspace_id, title, done)
 values
   ('ws-default', 'Definir nome do workspace', true),

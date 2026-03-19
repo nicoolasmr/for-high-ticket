@@ -122,8 +122,6 @@ SEED_TASKS = [
     ('ws-default', 'lead-4', '18:00', 'Primeira resposta para Juliana Costa', 'high', 0),
 ]
 
-SEED_TEAM = [('ws-default', 'Carla', 'manager'), ('ws-default', 'Marcos', 'rep'), ('ws-default', 'Rafa', 'rep'), ('ws-clinics', 'Bruna', 'manager')]
-
 SEED_ONBOARDING = [
     ('ws-default', 'Definir nome do workspace', 1),
     ('ws-default', 'Configurar pipeline padrão', 1),
@@ -225,13 +223,6 @@ def init_db(db_path: Path | None = None) -> None:
                 completed integer not null default 0
             );
 
-            create table if not exists team_members (
-                id integer primary key autoincrement,
-                workspace_id text not null references workspaces(id),
-                name text not null,
-                role text not null
-            );
-
             create table if not exists onboarding_steps (
                 id integer primary key autoincrement,
                 workspace_id text references workspaces(id),
@@ -256,6 +247,7 @@ def init_db(db_path: Path | None = None) -> None:
             );
             '''
         )
+        conn.execute('drop table if exists team_members')
         if not has_column(conn, 'tasks', 'workspace_id'):
             conn.execute('alter table tasks add column workspace_id text references workspaces(id)')
             conn.execute(
@@ -332,7 +324,6 @@ def seed_db(conn: sqlite3.Connection) -> None:
             for lead in SEED_LEADS
         ],
     )
-    conn.executemany('insert into team_members (workspace_id, name, role) values (?, ?, ?)', SEED_TEAM)
     conn.executemany('insert into tasks (workspace_id, lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?, ?)', SEED_TASKS)
     conn.executemany('insert into onboarding_steps (workspace_id, title, done) values (?, ?, ?)', SEED_ONBOARDING)
     for lead_id, author, body in SEED_NOTES:
