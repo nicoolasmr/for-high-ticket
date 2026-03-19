@@ -27,7 +27,7 @@ Esta base já cobre:
 ## Principais rotas
 
 - `GET /api/health`
-- `GET /api/workspaces`
+- `GET /api/workspaces` *(requer sessão)*
 - `GET /api/dashboard` *(requer sessão)*
 - `GET /api/leads` *(requer sessão)*
 - `POST /api/leads` *(requer sessão)*

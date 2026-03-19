@@ -190,6 +190,11 @@ class RevenueOSHttpTestCase(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(payload['error'], 'Unauthorized')
 
+    def test_workspaces_require_authentication(self):
+        status, payload = self.request('GET', '/api/workspaces')
+        self.assertEqual(status, 401)
+        self.assertEqual(payload['error'], 'Unauthorized')
+
     def test_dashboard_priority_tasks_are_workspace_scoped(self):
         status, payload = self.request('GET', '/api/dashboard?workspace=ws-default', token=self.session['token'])
         self.assertEqual(status, 200)

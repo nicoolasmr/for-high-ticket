@@ -835,13 +835,10 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
                 session = fetch_session(conn, token)
                 return self.write_json(session if session else {'error': 'Unauthorized'}, status=200 if session else 401)
             if parsed.path == '/api/workspaces':
-                token = self.read_bearer_token()
-                if token:
-                    session = fetch_session(conn, token)
-                    if not session:
-                        return self.write_json({'error': 'Unauthorized'}, status=401)
-                    return self.write_json({'items': session['workspaces']})
-                return self.write_json({'items': fetch_workspaces(conn)})
+                session = self.require_session(conn)
+                if not session:
+                    return self.write_json({'error': 'Unauthorized'}, status=401)
+                return self.write_json({'items': session['workspaces']})
 
             session = self.require_session(conn)
             if not session:
