@@ -228,11 +228,85 @@ async function testActiveWorkspaceLoginBootstrapsAppData() {
   assert.equal(harness.elements['#workspace-name'].textContent, 'High Ticket Labs')
 }
 
+async function testLeadNameEscapesHtmlTags() {
+  const harness = createHarness()
+  await harness.call("state.stages = [{ id: 'entry', name: 'Entrada' }]")
+  harness.setFetchQueue([{
+    ok: true,
+    body: {
+      items: [{
+        id: 'lead-1',
+        name: '<img src=x onerror=alert(1)>Alice',
+        company: 'Acme <b>Corp</b>',
+        source: 'Inbound',
+        stageId: 'entry',
+        owner: 'Carla',
+        temperature: 'hot',
+        nextAction: 'Ligar <strong>hoje</strong>',
+        value: 12000,
+        status: 'novo',
+        lostReason: ''
+      }]
+    }
+  }])
+
+  await harness.call('loadLeads()')
+
+  assert.match(harness.elements['#leads-table-body'].innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;Alice/)
+  assert.doesNotMatch(harness.elements['#leads-table-body'].innerHTML, /<img src=x onerror=alert\(1\)>/)
+  assert.match(harness.elements['#leads-table-body'].innerHTML, /Acme &lt;b&gt;Corp&lt;\/b&gt;/)
+}
+
+async function testNotesEscapeScriptAndInlineAttributes() {
+  const harness = createHarness()
+  await harness.call("state.selectedLeadId = 'lead-1'")
+  harness.setFetchQueue([{
+    ok: true,
+    body: {
+      items: [{
+        author: 'Bia',
+        body: '<script>alert(1)</script><a href=\"#\" onclick=\"evil()\">click</a>',
+        created_at: '2026-03-19T10:00:00.000Z'
+      }]
+    }
+  }])
+
+  await harness.call('loadNotes()')
+
+  assert.match(harness.elements['#notes-list'].innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
+  assert.match(harness.elements['#notes-list'].innerHTML, /onclick=&quot;evil\(\)&quot;/)
+  assert.doesNotMatch(harness.elements['#notes-list'].innerHTML, /<script>/)
+}
+
+async function testTeamMemberEmailEscapesSpecialCharacters() {
+  const harness = createHarness()
+  harness.setFetchQueue([{
+    ok: true,
+    body: {
+      items: [{
+        id: 'user-1',
+        name: 'Carla',
+        email: 'carla+vip&ops<admin>@example.com',
+        role: 'admin',
+        status: 'active'
+      }]
+    }
+  }])
+
+  await harness.call('loadTeam()')
+
+  assert.match(harness.elements['#team-list'].innerHTML, /carla\+vip&amp;ops&lt;admin&gt;@example.com/)
+  assert.doesNotMatch(harness.elements['#team-list'].innerHTML, /carla\+vip&ops<admin>@example.com/)
+}
+
 Promise.resolve()
   .then(testInvalidSavedTokenClearsAuthState)
   .then(testLogoutClearsLocalStateEvenWhenApiFails)
   .then(testInviteOnlyLoginSkipsProtectedBoot)
   .then(testActiveWorkspaceLoginBootstrapsAppData)
+  .then(testLeadNameEscapesHtmlTags)
+  .then(testNotesEscapeScriptAndInlineAttributes)
+  .then(testTeamMemberEmailEscapesSpecialCharacters)
   .then(() => {
     console.log('app.js frontend checks passed')
   })
