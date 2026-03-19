@@ -93,6 +93,12 @@ Depois abra:
 - Siga `docs/supabase-deploy.md` para escolher a connection string correta e preparar o deploy.
 - Consulte `docs/production-hardening.md` antes de publicar em Kubernetes ou aumentar `replicas`.
 
+## Plataforma / produção
+
+- Use `Dockerfile` e `.dockerignore` como base para build da imagem.
+- Ajuste os manifests em `k8s/` com imagem, domínio e secrets reais.
+- Siga `docs/production-hardening.md` para a ordem de evolução: rotas, multitenancy, devops e Kubernetes.
+
 ## Próximos passos naturais
 
 - permissões por papel;
