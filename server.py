@@ -216,7 +216,7 @@ def init_db(db_path: Path | None = None) -> None:
 
             create table if not exists tasks (
                 id integer primary key autoincrement,
-                workspace_id text references workspaces(id),
+                workspace_id text not null references workspaces(id),
                 lead_id text references leads(id),
                 due_time text not null,
                 title text not null,
@@ -233,7 +233,7 @@ def init_db(db_path: Path | None = None) -> None:
 
             create table if not exists onboarding_steps (
                 id integer primary key autoincrement,
-                workspace_id text references workspaces(id),
+                workspace_id text not null references workspaces(id),
                 title text not null,
                 done integer not null
             );
@@ -256,7 +256,7 @@ def init_db(db_path: Path | None = None) -> None:
             '''
         )
         if not has_column(conn, 'tasks', 'workspace_id'):
-            conn.execute('alter table tasks add column workspace_id text references workspaces(id)')
+            conn.execute("alter table tasks add column workspace_id text not null default 'ws-default' references workspaces(id)")
             conn.execute(
                 '''
                 update tasks
@@ -269,7 +269,7 @@ def init_db(db_path: Path | None = None) -> None:
                 '''
             )
         if not has_column(conn, 'onboarding_steps', 'workspace_id'):
-            conn.execute('alter table onboarding_steps add column workspace_id text references workspaces(id)')
+            conn.execute("alter table onboarding_steps add column workspace_id text not null default 'ws-default' references workspaces(id)")
             conn.execute("update onboarding_steps set workspace_id = 'ws-default' where workspace_id is null")
         if not has_column(conn, 'workspace_memberships', 'status'):
             conn.execute("alter table workspace_memberships add column status text not null default 'active'")

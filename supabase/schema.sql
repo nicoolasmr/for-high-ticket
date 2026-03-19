@@ -54,7 +54,7 @@ create table if not exists public.leads (
 
 create table if not exists public.tasks (
   id bigint generated always as identity primary key,
-  workspace_id text references public.workspaces(id) on delete cascade,
+  workspace_id text not null references public.workspaces(id) on delete cascade,
   lead_id text references public.leads(id) on delete cascade,
   due_time text not null,
   title text not null,
@@ -71,7 +71,7 @@ create table if not exists public.team_members (
 
 create table if not exists public.onboarding_steps (
   id bigint generated always as identity primary key,
-  workspace_id text references public.workspaces(id) on delete cascade,
+  workspace_id text not null references public.workspaces(id) on delete cascade,
   title text not null,
   done boolean not null default false
 );
@@ -91,3 +91,7 @@ create table if not exists public.events (
   payload_json jsonb not null,
   created_at timestamptz not null
 );
+
+
+alter table public.tasks alter column workspace_id set not null;
+alter table public.onboarding_steps alter column workspace_id set not null;
