@@ -29,6 +29,9 @@ Esta base já cobre:
 - `supabase/indexes.sql`: índices de performance recomendados para a base no Supabase.
 - `supabase/rls.sql`: pacote inicial de RLS/policies para multitenancy e segurança de leitura/escrita.
 - `.env.example`: variáveis de ambiente sugeridas para deploy e conexão futura com Supabase.
+- `Dockerfile` / `.dockerignore`: containerização inicial para deploy.
+- `k8s/`: manifests base de Kubernetes (namespace, config, secret example, deployment, service, ingress).
+- `docs/production-hardening.md`: roadmap operacional para rotas, multitenancy, devops e Kubernetes.
 
 ## Principais rotas
 
@@ -85,6 +88,12 @@ Depois abra:
 - Rode `supabase/rls.sql` para habilitar RLS e as policies iniciais.
 - Preencha `.env.example` com os dados reais do projeto Supabase.
 - Siga `docs/supabase-deploy.md` para escolher a connection string correta e preparar o deploy.
+
+## Plataforma / produção
+
+- Use `Dockerfile` e `.dockerignore` como base para build da imagem.
+- Ajuste os manifests em `k8s/` com imagem, domínio e secrets reais.
+- Siga `docs/production-hardening.md` para a ordem de evolução: rotas, multitenancy, devops e Kubernetes.
 
 ## Próximos passos naturais
 
