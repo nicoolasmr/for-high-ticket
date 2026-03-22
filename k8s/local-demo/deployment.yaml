@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: revenue-os-local-demo
+  labels:
+    app: revenue-os
+    runtime-profile: local-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: revenue-os
+      runtime-profile: local-demo
+  template:
+    metadata:
+      labels:
+        app: revenue-os
+        runtime-profile: local-demo
+    spec:
+      containers:
+        - name: revenue-os
+          image: ghcr.io/example/revenue-os:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: HOST
+              value: 0.0.0.0
+            - name: PORT
+              value: "3000"
+          volumeMounts:
+            - name: sqlite-data
+              mountPath: /data
+      volumes:
+        - name: sqlite-data
+          emptyDir: {}
