@@ -84,7 +84,3 @@ create table if not exists public.events (
   payload_json jsonb not null,
   created_at timestamptz not null
 );
-
-
-alter table public.tasks alter column workspace_id set not null;
-alter table public.onboarding_steps alter column workspace_id set not null;

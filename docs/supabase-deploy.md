@@ -6,7 +6,6 @@
 - `supabase/seed.sql` carrega os dados demo iniciais no projeto.
 - `supabase/indexes.sql` aplica os índices principais para performance.
 - `supabase/rls.sql` habilita o primeiro pacote de RLS/policies para isolamento por workspace.
-- o modelo de time/convites no Supabase usa `users` + `workspace_memberships` como fonte única de verdade.
 - `.env.example` já inclui placeholders para `SUPABASE_PROJECT_URL`, keys e connection strings/poolers.
 - `server.py` agora respeita `HOST` e `PORT`, o que facilita deploy em plataformas como Render, Fly.io ou Railway.
 

@@ -1,40 +1,66 @@
-# Production Hardening
+# Production Hardening Roadmap
 
-## Estado atual do runtime
+## 1. Rotas e backend
 
-O backend ainda usa **SQLite local** como persistência padrão. Isso significa que cada pod/container mantém seu próprio arquivo de banco, sem coordenação com outras réplicas.
+Objetivo imediato:
 
-### Implicação direta para Kubernetes
+- migrar o contrato atual de `/api/*` para persistência em Postgres/Supabase;
+- separar melhor autenticação, autorização e acesso a dados;
+- remover dependência do banco SQLite local em produção.
 
-- **`replicas: 1` é o único modo seguro** enquanto a aplicação ainda grava em SQLite local.
-- Escalar horizontalmente antes da migração para **Postgres/Supabase** pode causar divergência de dados entre pods, leituras inconsistentes e perda aparente de alterações dependendo de qual réplica atende a requisição.
-- Reinícios e re-agendamentos de pods também podem descartar dados locais se o volume não for persistente e compartilhado.
+Checklist sugerido:
 
-## Perfis de manifesto
+1. extrair uma camada de repositório para leads, tasks, notes, team e analytics;
+2. trocar queries SQLite por acesso Postgres/Supabase;
+3. padronizar erros da API (`401`, `403`, `404`, `409`, `422`);
+4. adicionar paginação/filtros estáveis nas rotas de listagem;
+5. adicionar request IDs e logging estruturado.
 
-O repositório agora separa dois perfis de uso:
+## 2. Multitenancy real
 
-- `k8s/deployment.yaml`: manifesto padrão alinhado com a realidade atual do runtime, fixado em **1 réplica**.
-- `k8s/local-demo/deployment.yaml`: perfil explícito para ambientes locais/demo com SQLite.
-- `k8s/production/deployment.yaml`: perfil de produção, com múltiplas réplicas, que **exige** banco compartilhado via `DATABASE_URL` apontando para Postgres/Supabase.
+A base atual já tem isolamento por `workspace_id`, mas para produção é preciso reforçar:
 
-## Regra operacional
+- todas as tabelas operacionais com `workspace_id` obrigatório;
+- RLS no Supabase para leitura e escrita por membership;
+- papéis (`admin`, `manager`, `rep`) aplicados de forma consistente em API, banco e UI;
+- trilha de auditoria por ação sensível.
 
-### Pode usar múltiplas réplicas quando
+Checklist sugerido:
 
-- a persistência do `server.py` tiver sido migrada para Postgres/Supabase;
-- todas as instâncias compartilharem o mesmo banco remoto;
-- segredos/variáveis de ambiente de banco estiverem configurados no cluster;
-- a equipe tiver validado concorrência, migrações e health checks no novo runtime.
+1. revisar todas as entidades para garantir tenancy explícita;
+2. concluir policies RLS e cenários de aceite/convite;
+3. definir modelo de auth real (Supabase Auth + mapeamento para `users`/`workspace_memberships`);
+4. criar índices por workspace para tabelas de alto volume.
 
-### Não pode usar múltiplas réplicas quando
+## 3. DevOps e deploy
 
-- a aplicação ainda estiver usando SQLite local;
-- o banco estiver acoplado ao filesystem do pod;
-- cada réplica puder iniciar com um arquivo diferente ou vazio.
+Artefatos já preparados no repositório:
 
-## Recomendação de rollout
+- `Dockerfile`
+- `.dockerignore`
+- `k8s/*.yaml`
+- `.env.example`
 
-1. Use `k8s/deployment.yaml` ou `k8s/local-demo/deployment.yaml` para demos e ambientes temporários.
-2. Conclua a migração de persistência para Postgres/Supabase.
-3. Só depois promova o cluster para `k8s/production/deployment.yaml` e aumente `replicas`.
+Próximos passos recomendados:
+
+0. manter apenas **1 réplica** enquanto o runtime ainda usar SQLite local;
+1. publicar imagem em registry (GHCR/ECR/GAR);
+2. configurar ambiente de staging com Supabase real;
+3. adicionar CI para testes Python + frontend harness;
+4. adicionar CD para aplicar manifests ou Helm chart.
+
+## 4. Kubernetes
+
+Os manifests em `k8s/` servem como ponto de partida e ainda precisam ser personalizados:
+
+- imagem final do container;
+- domínio do Ingress;
+- secret real com dados do Supabase;
+- autoscaling, network policies e observabilidade.
+
+Checklist sugerido:
+
+1. aplicar `namespace`, `configmap`, `secret`, `deployment`, `service`, `ingress`;
+2. adicionar HPA quando houver baseline de tráfego;
+3. integrar logs e métricas (Grafana/Prometheus/OpenTelemetry);
+4. configurar backups e política de incidentes.

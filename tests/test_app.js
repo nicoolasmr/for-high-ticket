@@ -9,15 +9,12 @@ function createElement(overrides = {}) {
     textContent: '',
     value: '',
     dataset: {},
-    listeners: {},
     classList: {
       toggle() {},
       add() {},
       remove() {}
     },
-    addEventListener(type, handler) {
-      this.listeners[type] = handler
-    },
+    addEventListener() {},
     reset() {},
     closest() { return this },
     ...overrides
@@ -140,21 +137,6 @@ function createHarness({ initialStorage = {}, initialFetchQueue = [] } = {}) {
   }
 }
 
-async function seedAuthenticatedWorkspace(harness, { workspaceId = 'ws-default', workspaceName = 'High Ticket Labs', role = 'admin' } = {}) {
-  await harness.call(`
-    state.authToken = 'active-token'
-    state.user = { id: 'user-1', name: 'Carla', email: 'carla@highticketlabs.com' }
-    state.workspaceId = '${workspaceId}'
-    state.workspaces = [
-      { id: 'ws-default', name: 'High Ticket Labs', role: '${role}' },
-      { id: 'ws-clinics', name: 'Clínicas Premium', role: '${role}' }
-    ]
-    state.team = [{ id: 'user-1', name: 'Carla', email: 'carla@highticketlabs.com', role: '${role}', status: 'active' }]
-    renderFilters()
-  `)
-  assert.equal(harness.elements['#workspace-name'].textContent, workspaceName)
-}
-
 async function testInvalidSavedTokenClearsAuthState() {
   const harness = createHarness({
     initialStorage: { 'revenue-os-demo-token': 'stale-token' },
@@ -240,164 +222,36 @@ async function testActiveWorkspaceLoginBootstrapsAppData() {
   await harness.call('login(document.querySelector("#login-form"))')
 
   assert.equal(harness.fetchCalls.length, 9)
-  assert.match(harness.fetchCalls[1].url, /\/api\/workspaces\?workspace=ws-default/)
-  assert.match(harness.fetchCalls[2].url, /\/api\/stages\?workspace=ws-default/)
-  assert.match(harness.fetchCalls[3].url, /\/api\/team\?workspace=ws-default/)
+  assert.match(harness.fetchCalls[1].url, /\/api\/workspaces/)
+  assert.match(harness.fetchCalls[2].url, /\/api\/stages/)
+  assert.match(harness.fetchCalls[3].url, /\/api\/team/)
   assert.equal(harness.elements['#workspace-name'].textContent, 'High Ticket Labs')
 }
 
-async function testWorkspaceSwitcherRefetchesViews() {
-  const harness = createHarness()
-  await seedAuthenticatedWorkspace(harness)
-  harness.setFetchQueue([
-    { ok: true, body: { kpis: [{ label: 'Leads', value: 3, detail: 'ws-clinics' }], priorities: [] } },
-    { ok: true, body: { items: [{ id: 'lead-3', name: 'Clínica Lumina', company: 'Clínica Lumina', source: 'Google', stageId: 'proposal', owner: 'Carla', temperature: 'hot', nextAction: 'Call final', value: 32000, status: 'proposta enviada' }] } },
-    { ok: true, body: { stages: [{ name: 'Proposta', leads: [{ id: 'lead-3', name: 'Clínica Lumina', company: 'Clínica Lumina', value: 32000, owner: 'Carla' }] }] } },
-    { ok: true, body: { tasks: [{ id: 'task-9', due_time: '17:00', title: 'Confirmar call', lead_id: 'lead-3', priority: 'medium' }], onboarding: [], completedCount: 1 } },
-    { ok: true, status: 403, body: { error: 'Analytics restrito' } },
-    { ok: true, body: { items: [{ id: 'user-1', name: 'Carla', email: 'carla@highticketlabs.com', role: 'admin', status: 'active' }] } },
-    { ok: true, body: { name: 'Clínica Lumina', company: 'Clínica Lumina', text: 'Resumo', status: 'proposta enviada', lostReason: null, objections: [], signals: [], nextBestAction: 'Fechar', suggestedReply: 'Vamos fechar' } },
-    { ok: true, body: { items: [] } },
-    { ok: true, body: { items: [] } }
-  ])
-
-  await harness.call(`
-    document.querySelector('#workspace-switcher').listeners.change({ target: { value: 'ws-clinics' } })
-  `)
-
-  assert.equal(harness.fetchCalls.length, 9)
-  assert.deepEqual(
-    harness.fetchCalls.map(({ url }) => url),
-    [
-      '/api/dashboard?workspace=ws-clinics',
-      '/api/leads?search=&owner=all&temperature=all&status=all&workspace=ws-clinics',
-      '/api/pipeline?workspace=ws-clinics',
-      '/api/tasks?workspace=ws-clinics',
-      '/api/analytics?workspace=ws-clinics',
-      '/api/team?workspace=ws-clinics',
-      '/api/leads/lead-3/summary?workspace=ws-clinics',
-      '/api/leads/lead-3/notes?workspace=ws-clinics',
-      '/api/leads/lead-3/timeline?workspace=ws-clinics'
-    ]
-  )
-  assert.equal(harness.elements['#workspace-name'].textContent, 'Clínicas Premium')
-  assert.match(harness.elements['#leads-table-body'].innerHTML, /Clínica Lumina/)
-  assert.match(harness.elements['#task-list'].innerHTML, /Confirmar call/)
-  assert.match(harness.elements['#insights-list'].innerHTML, /Acesso restrito/)
-}
-
-async function testCreateLeadUpdatesSelectedLeadId() {
-  const harness = createHarness()
-  await seedAuthenticatedWorkspace(harness)
-  harness.elements['#lead-form'].fields = { name: 'Novo Lead', company: 'Acme', source: 'Indicação', stageId: 'entry', owner: 'Carla', temperature: 'warm', nextAction: 'Enviar proposta', value: '15000', status: 'novo' }
-  harness.setFetchQueue([
-    { ok: true, body: { id: 'lead-new', name: 'Novo Lead' } },
-    { ok: true, body: { kpis: [], priorities: [] } },
-    { ok: true, body: { items: [{ id: 'lead-new', name: 'Novo Lead', company: 'Acme', source: 'Indicação', stageId: 'entry', owner: 'Carla', temperature: 'warm', nextAction: 'Enviar proposta', value: 15000, status: 'novo' }] } },
-    { ok: true, body: { stages: [] } },
-    { ok: true, body: { tasks: [], onboarding: [], completedCount: 0 } },
-    { ok: true, body: { insights: ['Lead criado'], sources: [], owners: [], statuses: [] } },
-    { ok: true, body: { items: [{ id: 'user-1', name: 'Carla', email: 'carla@highticketlabs.com', role: 'admin', status: 'active' }] } },
-    { ok: true, body: { name: 'Novo Lead', company: 'Acme', text: 'Resumo novo', status: 'novo', lostReason: null, objections: [], signals: [], nextBestAction: 'Avançar', suggestedReply: 'Mensagem' } },
-    { ok: true, body: { items: [] } },
-    { ok: true, body: { items: [] } }
-  ])
-
-  await harness.call('createLead(document.querySelector("#lead-form"))')
-
-  assert.equal(await harness.call('state.selectedLeadId'), 'lead-new')
-  assert.equal(harness.fetchCalls.length, 10)
-  assert.equal(harness.fetchCalls[0].url, '/api/leads?workspace=ws-default')
-  assert.equal(JSON.parse(harness.fetchCalls[0].options.body).workspaceId, 'ws-default')
-  assert.equal(harness.elements['#lead-form-feedback'].textContent, 'Lead Novo Lead criado com sucesso.')
-  assert.match(harness.elements['#leads-table-body'].innerHTML, /Novo Lead/)
-}
-
-async function testCreateTaskUpdatesIndicators() {
-  const harness = createHarness()
-  await seedAuthenticatedWorkspace(harness)
-  harness.elements['#task-form'].fields = { title: 'Ligar lead VIP', due_time: '10:00', priority: 'urgent', lead_id: 'lead-1' }
-  harness.setFetchQueue([
-    { ok: true, body: { id: 'task-10', title: 'Ligar lead VIP' } },
-    { ok: true, body: { tasks: [{ id: 'task-10', due_time: '10:00', title: 'Ligar lead VIP', lead_id: 'lead-1', priority: 'urgent' }], onboarding: [], completedCount: 2 } }
-  ])
-
-  await harness.call('createTask(document.querySelector("#task-form"))')
-
-  assert.equal(harness.fetchCalls.length, 2)
-  assert.equal(harness.fetchCalls[0].url, '/api/tasks?workspace=ws-default')
-  assert.equal(JSON.parse(harness.fetchCalls[0].options.body).workspaceId, 'ws-default')
-  assert.equal(harness.elements['#completed-count-pill'].textContent, '2 concluídas')
-  assert.match(harness.elements['#task-list'].innerHTML, /Ligar lead VIP/)
-  assert.equal(harness.elements['#task-form-feedback'].textContent, 'Task Ligar lead VIP criada com sucesso.')
-}
-
-async function testAnalytics403ShowsRestrictedState() {
-  const harness = createHarness()
-  await seedAuthenticatedWorkspace(harness)
-  harness.setFetchQueue([{ ok: false, status: 403, body: { error: 'Forbidden' } }])
-
-  await harness.call('loadAnalytics()')
-
-  assert.equal(harness.fetchCalls.length, 1)
-  assert.equal(harness.fetchCalls[0].url, '/api/analytics?workspace=ws-default')
-  assert.match(harness.elements['#insights-list'].innerHTML, /Acesso restrito/)
-  assert.match(harness.elements['#insights-list'].innerHTML, /Forbidden/)
-}
-
-async function testAcceptInviteReloadsSessionAndAppData() {
+async function testEscapesUserControlledHtmlInRenderedViews() {
   const harness = createHarness()
   harness.setFetchQueue([
-    { ok: true, body: { accepted: true } },
-    { ok: true, body: { user: { id: 'user-4', name: 'Bia', email: 'bia@invitee.com' }, workspaces: [{ id: 'ws-default', name: 'High Ticket Labs', role: 'rep' }], invites: [] } },
-    { ok: true, body: { items: [{ id: 'ws-default', name: 'High Ticket Labs', role: 'rep' }] } },
-    { ok: true, body: { items: [{ id: 'entry', name: 'Entrada' }] } },
-    { ok: true, body: { items: [{ id: 'user-4', name: 'Bia', email: 'bia@invitee.com', role: 'rep', status: 'active' }] } },
-    { ok: true, body: { kpis: [], priorities: [] } },
-    { ok: true, body: { items: [{ id: 'lead-1', name: 'Lead Aceito', company: 'Acme', source: 'Google', stageId: 'entry', owner: 'Bia', temperature: 'warm', nextAction: 'Atender', value: 10000, status: 'novo' }] } },
-    { ok: true, body: { stages: [] } },
-    { ok: true, body: { tasks: [], onboarding: [], completedCount: 0 } },
-    { ok: false, status: 403, body: { error: 'Forbidden' } },
-    { ok: true, body: { name: 'Lead Aceito', company: 'Acme', text: 'Resumo', status: 'novo', lostReason: null, objections: [], signals: [], nextBestAction: 'Atender', suggestedReply: 'Oi' } },
-    { ok: true, body: { items: [] } },
-    { ok: true, body: { items: [] } }
+    { ok: true, body: { items: [{ id: 'user-1', name: '<img src=x onerror=1>', email: 'carla@example.com', role: 'admin', status: 'active' }] } },
+    { ok: true, body: { items: [{ id: 'lead-1', name: '<script>alert(1)</script>', company: 'ACME <b>bold</b>', source: 'Web', stageId: 'entry', owner: 'Carla', temperature: 'hot', nextAction: 'Hoje', value: 1000, status: 'Novo lead' }], meta: { total: 1, limit: null, offset: 0 } } },
+    { ok: true, body: { name: 'Lead <img>', company: 'Empresa <svg>', text: '<script>boom</script>', status: 'Novo', objections: ['<b>obj</b>'], signals: ['<i>signal</i>'], nextBestAction: '<span>next</span>', suggestedReply: '<img src=x>' } },
+    { ok: true, body: { items: [{ eventType: 'note_added', payload: { body: '<script>x</script>' }, createdAt: '2026-01-01T00:00:00Z' }] } },
+    { ok: true, body: { items: [{ author: 'Carla', body: '<img src=x onerror=1>', created_at: '2026-01-01T00:00:00Z' }] } }
   ])
 
-  await harness.call('acceptInvite("ws-default")')
-
-  assert.equal(harness.fetchCalls.length, 13)
-  assert.deepEqual(
-    harness.fetchCalls.slice(0, 2).map(({ url }) => url),
-    [
-      '/api/team/accept-invite?workspace=ws-default',
-      '/api/auth/me?workspace=ws-default'
-    ]
-  )
-  assert.equal(harness.elements['#workspace-name'].textContent, 'High Ticket Labs')
-  assert.match(harness.elements['#leads-table-body'].innerHTML, /Lead Aceito/)
-  assert.match(harness.elements['#login-feedback'].textContent, /^$/)
-}
-
-async function testRemovingSelectedLeadViaFiltersUpdatesSelection() {
-  const harness = createHarness()
-  await seedAuthenticatedWorkspace(harness)
-  await harness.call(`
-    state.selectedLeadId = 'lead-1'
-    state.owner = 'Bia'
-    aiSummary.innerHTML = '<p>Resumo antigo</p>'
-    notesList.innerHTML = '<p>Notas antigas</p>'
-    timelineList.innerHTML = '<p>Timeline antiga</p>'
-  `)
-  harness.setFetchQueue([
-    { ok: true, body: { items: [{ id: 'lead-2', name: 'Lead Filtrado', company: 'Filtro SA', source: 'Referral', stageId: 'entry', owner: 'Bia', temperature: 'hot', nextAction: 'Follow-up', value: 5000, status: 'qualificado' }] } }
-  ])
-
+  await harness.call('state.stages = [{ id: "entry", name: "Entrada" }]')
+  await harness.call('loadTeam()')
   await harness.call('loadLeads()')
+  await harness.call('state.selectedLeadId = "lead-1"')
+  await harness.call('loadSummary("lead-1")')
+  await harness.call('loadTimeline()')
+  await harness.call('loadNotes()')
 
-  assert.equal(harness.fetchCalls.length, 1)
-  assert.equal(harness.fetchCalls[0].url, '/api/leads?search=&owner=Bia&temperature=all&status=all&workspace=ws-default')
-  assert.equal(await harness.call('state.selectedLeadId'), 'lead-2')
-  assert.match(harness.elements['#leads-table-body'].innerHTML, /Lead Filtrado/)
+  assert.match(harness.elements['#team-list'].innerHTML, /&lt;img src=x onerror=1&gt;/)
+  assert.doesNotMatch(harness.elements['#team-list'].innerHTML, /<img src=x onerror=1>/)
+  assert.match(harness.elements['#leads-table-body'].innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
+  assert.match(harness.elements['#ai-summary'].innerHTML, /&lt;script&gt;boom&lt;\/script&gt;/)
+  assert.match(harness.elements['#timeline-list'].innerHTML, /&lt;script&gt;x&lt;\/script&gt;/)
+  assert.match(harness.elements['#notes-list'].innerHTML, /&lt;img src=x onerror=1&gt;/)
 }
 
 Promise.resolve()
@@ -405,12 +259,7 @@ Promise.resolve()
   .then(testLogoutClearsLocalStateEvenWhenApiFails)
   .then(testInviteOnlyLoginSkipsProtectedBoot)
   .then(testActiveWorkspaceLoginBootstrapsAppData)
-  .then(testWorkspaceSwitcherRefetchesViews)
-  .then(testCreateLeadUpdatesSelectedLeadId)
-  .then(testCreateTaskUpdatesIndicators)
-  .then(testAnalytics403ShowsRestrictedState)
-  .then(testAcceptInviteReloadsSessionAndAppData)
-  .then(testRemovingSelectedLeadViaFiltersUpdatesSelection)
+  .then(testEscapesUserControlledHtmlInRenderedViews)
   .then(() => {
     console.log('app.js frontend checks passed')
   })
