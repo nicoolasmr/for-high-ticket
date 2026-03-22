@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: revenue-os-config
+  namespace: revenue-os
+data:
+  HOST: "0.0.0.0"
+  PORT: "3000"

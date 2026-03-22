@@ -1,0 +1,11 @@
+create index if not exists idx_users_email_lower on public.users (lower(email));
+create index if not exists idx_workspace_memberships_user_status on public.workspace_memberships (user_id, status);
+create index if not exists idx_workspace_memberships_workspace_status on public.workspace_memberships (workspace_id, status);
+create index if not exists idx_leads_workspace_stage on public.leads (workspace_id, stage_id);
+create index if not exists idx_leads_workspace_owner on public.leads (workspace_id, owner);
+create index if not exists idx_leads_workspace_status on public.leads (workspace_id, status);
+create index if not exists idx_tasks_workspace_completed_due on public.tasks (workspace_id, completed, due_time);
+create index if not exists idx_tasks_lead_id on public.tasks (lead_id);
+create index if not exists idx_notes_lead_created_at on public.notes (lead_id, created_at desc);
+create index if not exists idx_events_lead_created_at on public.events (lead_id, created_at desc);
+create index if not exists idx_sessions_user_created_at on public.sessions (user_id, created_at desc);
