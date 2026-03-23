@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: revenue-os-production
+  labels:
+    app: revenue-os
+    runtime-profile: production
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: revenue-os
+      runtime-profile: production
+  template:
+    metadata:
+      labels:
+        app: revenue-os
+        runtime-profile: production
+    spec:
+      containers:
+        - name: revenue-os
+          image: ghcr.io/example/revenue-os:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: HOST
+              value: 0.0.0.0
+            - name: PORT
+              value: "3000"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: revenue-os-db
+                  key: database-url
+          # Produção com múltiplas réplicas só é segura após migrar a persistência
+          # para Postgres/Supabase ou outro banco compartilhado.
