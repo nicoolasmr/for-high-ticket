@@ -49,6 +49,12 @@ Próximos passos recomendados:
 3. adicionar CI para testes Python + frontend harness;
 4. adicionar CD para aplicar manifests ou Helm chart.
 
+Configuração recomendada de runtime:
+
+- `REVENUE_OS_SEED_DEMO_DATA=0` em produção;
+- `REVENUE_OS_SESSION_TTL_HOURS` com um TTL explícito para sessões;
+- `REVENUE_OS_AUTO_MIGRATE=0` após aplicar schema/migrations de forma controlada.
+
 ## 4. Kubernetes
 
 Os manifests em `k8s/` servem como ponto de partida e ainda precisam ser personalizados:

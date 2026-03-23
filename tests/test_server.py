@@ -76,6 +76,17 @@ class RevenueOSTestCase(unittest.TestCase):
     def test_resolve_backend_name_prefers_sqlite_with_explicit_db_path(self):
         self.assertEqual(server.resolve_backend_name(self.db_path), 'sqlite')
 
+    def test_should_seed_demo_data_can_be_disabled(self):
+        original = os.environ.get('REVENUE_OS_SEED_DEMO_DATA')
+        try:
+            os.environ['REVENUE_OS_SEED_DEMO_DATA'] = '0'
+            self.assertEqual(server.should_seed_demo_data('sqlite'), False)
+        finally:
+            if original is None:
+                os.environ.pop('REVENUE_OS_SEED_DEMO_DATA', None)
+            else:
+                os.environ['REVENUE_OS_SEED_DEMO_DATA'] = original
+
     def test_seeded_leads_exist(self):
         leads = server.fetch_leads(self.conn)
         self.assertGreaterEqual(len(leads), 3)
@@ -150,6 +161,23 @@ class RevenueOSTestCase(unittest.TestCase):
         fetched = server.fetch_session(self.conn, session['token'])
         self.assertIsNotNone(fetched)
         self.assertEqual(fetched['user']['email'], 'carla@highticketlabs.com')
+
+    def test_expired_session_is_rejected(self):
+        original_ttl = os.environ.get('REVENUE_OS_SESSION_TTL_HOURS')
+        try:
+            os.environ['REVENUE_OS_SESSION_TTL_HOURS'] = '1'
+            session = server.authenticate(self.conn, 'carla@highticketlabs.com', 'demo123')
+            self.conn.execute(
+                'update sessions set created_at = ? where token = ?',
+                ('2000-01-01T00:00:00+00:00', session['token']),
+            )
+            self.conn.commit()
+            self.assertIsNone(server.fetch_session(self.conn, session['token']))
+        finally:
+            if original_ttl is None:
+                os.environ.pop('REVENUE_OS_SESSION_TTL_HOURS', None)
+            else:
+                os.environ['REVENUE_OS_SESSION_TTL_HOURS'] = original_ttl
 
     def test_membership_role_helpers(self):
         membership = server.fetch_membership(self.conn, 'user-3', 'ws-default')

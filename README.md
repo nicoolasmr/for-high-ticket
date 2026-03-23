@@ -37,6 +37,12 @@ Esta base já cobre:
 
 > **Importante:** enquanto o runtime padrão continuar em SQLite local, o manifesto em `k8s/deployment.yaml` deve permanecer com uma única réplica. Escala horizontal só é segura após migrar a persistência para Postgres/Supabase compartilhado.
 
+### Controles operacionais de produção
+
+- `REVENUE_OS_AUTO_MIGRATE`: controla se o runtime aplica schema automaticamente no boot.
+- `REVENUE_OS_SEED_DEMO_DATA`: controla se os dados demo são carregados automaticamente.
+- `REVENUE_OS_SESSION_TTL_HOURS`: expiração das sessões demo/API.
+
 ## Principais rotas
 
 - `GET /api/health`
@@ -94,6 +100,7 @@ Esta base agora já inclui:
 4. Para persistência real, configure `DATABASE_URL` ou uma das `SUPABASE_*_URL` e deixe o backend usar Postgres automaticamente.
 
 > **Importante:** no Vercel, o SQLite em `/tmp` continua útil para demo e smoke tests, mas a persistência final agora deve ser feita via `DATABASE_URL`/Supabase Postgres para produção.
+> **Recomendação de produção:** use `REVENUE_OS_SEED_DEMO_DATA=0`, ajuste `REVENUE_OS_SESSION_TTL_HOURS` e, se preferir migrations explícitas, desligue `REVENUE_OS_AUTO_MIGRATE` após aplicar `supabase/schema.sql`.
 
 ## O que o MVP valida hoje
 
