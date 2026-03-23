@@ -1,7 +1,7 @@
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 const authTokenKey = 'revenue-os-demo-token'
 
-const state = { activeView: 'dashboard', workspaceId: 'ws-default', search: '', owner: 'all', temperature: 'all', status: 'all', selectedLeadId: null, leads: [], stages: [], team: [], workspaces: [], invites: [], user: null, authToken: localStorage.getItem(authTokenKey) || '' }
+const state = { activeView: 'dashboard', workspaceId: 'ws-default', search: '', owner: 'all', temperature: 'all', status: 'all', selectedLeadId: null, leads: [], leadLimit: 2, leadOffset: 0, leadMeta: { total: 0, limit: 2, offset: 0 }, stages: [], team: [], workspaces: [], invites: [], user: null, authToken: localStorage.getItem(authTokenKey) || '' }
 const titleByView = { dashboard: 'Dashboard operacional', leads: 'Lead inbox', pipeline: 'Pipeline comercial', tasks: 'Tasks e follow-up', analytics: 'Analytics executivo' }
 
 function escapeHtml(value) {
@@ -51,6 +51,9 @@ const timelineList = qs('#timeline-list')
 const notesList = qs('#notes-list')
 const teamList = qs('#team-list')
 const leadsTableBody = qs('#leads-table-body')
+const leadsPaginationSummary = qs('#leads-pagination-summary')
+const leadsPrevPageButton = qs('#leads-prev-page')
+const leadsNextPageButton = qs('#leads-next-page')
 const pipelineBoard = qs('#pipeline-board')
 const taskList = qs('#task-list')
 const onboardingList = qs('#onboarding-list')
@@ -61,7 +64,9 @@ const statusPerformance = qs('#status-performance')
 
 function withWorkspace(url) {
   const next = new URL(url, window.location.origin)
-  next.searchParams.set('workspace', state.workspaceId)
+  if (next.pathname.startsWith('/api/') && !next.pathname.startsWith('/api/auth/') && next.pathname !== '/api/health' && state.workspaceId) {
+    next.searchParams.set('workspace', state.workspaceId)
+  }
   return `${next.pathname}${next.search}`
 }
 
@@ -131,6 +136,8 @@ function clearOperationalState() {
   state.workspaceId = ''
   state.selectedLeadId = null
   state.leads = []
+  state.leadOffset = 0
+  state.leadMeta = { total: 0, limit: state.leadLimit, offset: 0 }
   state.team = []
   state.stages = []
   workspaceSwitcher.innerHTML = ''
@@ -138,6 +145,9 @@ function clearOperationalState() {
   workspaceMeta.textContent = 'Aceite um convite para liberar a operação.'
   teamList.innerHTML = ''
   leadsTableBody.innerHTML = ''
+  leadsPaginationSummary.textContent = 'Mostrando 0-0 de 0 leads'
+  leadsPrevPageButton.disabled = true
+  leadsNextPageButton.disabled = true
   pipelineBoard.innerHTML = ''
   taskList.innerHTML = ''
   onboardingList.innerHTML = ''
@@ -153,6 +163,12 @@ function clearOperationalState() {
   completedCountPill.textContent = '0 concluídas'
   priorityPill.textContent = '0 leads críticos'
   teamFormSection.classList.add('hidden')
+}
+
+function clearLeadDetailPanels() {
+  aiSummary.innerHTML = ''
+  timelineList.innerHTML = ''
+  notesList.innerHTML = ''
 }
 
 function applySession(session) {
@@ -195,10 +211,24 @@ async function loadLeads() {
   next.searchParams.set('owner', state.owner)
   next.searchParams.set('temperature', state.temperature)
   next.searchParams.set('status', state.status)
+  next.searchParams.set('limit', String(state.leadLimit))
+  next.searchParams.set('offset', String(state.leadOffset))
   const payload = await request(`${next.pathname}?${next.searchParams.toString().replace(/^workspace=[^&]*&?/, '')}`)
   state.leads = payload.items
-  if (!state.selectedLeadId && state.leads[0]) state.selectedLeadId = state.leads[0].id
+  state.leadMeta = payload.meta || { total: payload.items.length, limit: state.leadLimit, offset: state.leadOffset }
+  state.leadOffset = state.leadMeta.offset || 0
+  const selectedLeadStillVisible = state.leads.some((lead) => lead.id === state.selectedLeadId)
+  state.selectedLeadId = selectedLeadStillVisible ? state.selectedLeadId : (state.leads[0]?.id || null)
+  if (!state.selectedLeadId) clearLeadDetailPanels()
   leadsTableBody.innerHTML = state.leads.map((lead) => `<tr><td><button class="table-lead-button" data-select-lead="${escapeHtml(lead.id)}"><strong>${escapeHtml(lead.name)}</strong><div class="table-sub">${escapeHtml(lead.company)} · ${escapeHtml(lead.source)}</div></button></td><td><select class="stage-select" data-stage-select="${escapeHtml(lead.id)}">${stageOptions(lead.stageId)}</select></td><td>${escapeHtml(lead.owner)}</td><td><span class="temp temp-${escapeHtml(lead.temperature)}">${escapeHtml(lead.temperature)}</span></td><td>${escapeHtml(lead.nextAction)}</td><td>${currency.format(lead.value)}</td><td>${escapeHtml(lead.status)}${lead.lostReason ? `<div class="table-sub">${escapeHtml(lead.lostReason)}</div>` : ''}</td></tr>`).join('')
+  const total = state.leadMeta.total || 0
+  const limit = state.leadMeta.limit || state.leadLimit
+  const offset = state.leadMeta.offset || 0
+  const rangeStart = total === 0 ? 0 : offset + 1
+  const rangeEnd = total === 0 ? 0 : Math.min(offset + state.leads.length, total)
+  leadsPaginationSummary.textContent = `Mostrando ${rangeStart}-${rangeEnd} de ${total} leads`
+  leadsPrevPageButton.disabled = offset <= 0
+  leadsNextPageButton.disabled = offset + limit >= total
 }
 
 async function loadSummary(leadId) { if (!leadId) return; const lead = await request(`/api/leads/${leadId}/summary`); aiSummary.innerHTML = `<div class="summary-block"><span class="eyebrow">${escapeHtml(lead.name)} · ${escapeHtml(lead.company)}</span><p>${escapeHtml(lead.text)}</p><p><strong>Status:</strong> ${escapeHtml(lead.status)}${lead.lostReason ? ` · ${escapeHtml(lead.lostReason)}` : ''}</p><div class="summary-columns"><div><strong>Objeções</strong><ul>${lead.objections.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div><div><strong>Sinais de compra</strong><ul>${lead.signals.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div></div><p><strong>Próxima melhor ação:</strong> ${escapeHtml(lead.nextBestAction)}</p><blockquote>${escapeHtml(lead.suggestedReply)}</blockquote></div>` }
@@ -232,7 +262,7 @@ async function refreshOperationalViews() {
   if (state.selectedLeadId) await Promise.all([loadSummary(state.selectedLeadId), loadNotes(), loadTimeline()])
 }
 
-const createLead = async (form) => { const payload = Object.fromEntries(new FormData(form).entries()); payload.value = Number(payload.value || 0); payload.workspaceId = state.workspaceId; const lead = await request('/api/leads', { method: 'POST', body: JSON.stringify(payload) }); state.selectedLeadId = lead.id; await refreshOperationalViews(); form.reset(); leadFormFeedback.textContent = `Lead ${lead.name} criado com sucesso.` }
+const createLead = async (form) => { const payload = Object.fromEntries(new FormData(form).entries()); payload.value = Number(payload.value || 0); payload.workspaceId = state.workspaceId; const lead = await request('/api/leads', { method: 'POST', body: JSON.stringify(payload) }); state.selectedLeadId = lead.id; state.leadOffset = 0; await refreshOperationalViews(); form.reset(); leadFormFeedback.textContent = `Lead ${lead.name} criado com sucesso.` }
 const moveLeadStage = async (leadId, stageId) => { await request(`/api/leads/${leadId}/stage`, { method: 'PATCH', body: JSON.stringify({ stageId }) }); await refreshOperationalViews() }
 const createTask = async (form) => { const payload = Object.fromEntries(new FormData(form).entries()); payload.workspaceId = state.workspaceId; const task = await request('/api/tasks', { method: 'POST', body: JSON.stringify(payload) }); await loadTasks(); form.reset(); taskFormFeedback.textContent = `Task ${task.title} criada com sucesso.` }
 const completeTask = async (taskId) => { await request(`/api/tasks/${taskId}/complete`, { method: 'POST', body: '{}' }); await loadTasks(); await loadDashboard(); await loadTimeline() }
@@ -274,11 +304,22 @@ function attachEvents() {
   navItems.forEach((item) => item.addEventListener('click', () => setView(item.dataset.view)))
   loginForm.addEventListener('submit', async (event) => { event.preventDefault(); try { await login(event.currentTarget) } catch (error) { loginFeedback.textContent = error.message } })
   logoutButton.addEventListener('click', async () => { try { await logout() } catch (error) { loginFeedback.textContent = error.message } })
-  workspaceSwitcher.addEventListener('change', async (event) => { state.workspaceId = event.target.value; state.selectedLeadId = null; state.owner = 'all'; state.temperature = 'all'; state.status = 'all'; await refreshOperationalViews() })
-  searchInput.addEventListener('input', async (event) => { state.search = event.target.value; await loadLeads() })
-  ownerFilter.addEventListener('change', async (event) => { state.owner = event.target.value; await loadLeads() })
-  temperatureFilter.addEventListener('change', async (event) => { state.temperature = event.target.value; await loadLeads() })
-  statusFilter.addEventListener('change', async (event) => { state.status = event.target.value; await loadLeads() })
+  workspaceSwitcher.addEventListener('change', async (event) => { state.workspaceId = event.target.value; state.selectedLeadId = null; state.owner = 'all'; state.temperature = 'all'; state.status = 'all'; state.leadOffset = 0; await refreshOperationalViews() })
+  searchInput.addEventListener('input', async (event) => { state.search = event.target.value; state.leadOffset = 0; await loadLeads() })
+  ownerFilter.addEventListener('change', async (event) => { state.owner = event.target.value; state.leadOffset = 0; await loadLeads() })
+  temperatureFilter.addEventListener('change', async (event) => { state.temperature = event.target.value; state.leadOffset = 0; await loadLeads() })
+  statusFilter.addEventListener('change', async (event) => { state.status = event.target.value; state.leadOffset = 0; await loadLeads() })
+  leadsPrevPageButton.addEventListener('click', async () => {
+    state.leadOffset = Math.max(0, state.leadOffset - state.leadLimit)
+    await loadLeads()
+  })
+  leadsNextPageButton.addEventListener('click', async () => {
+    const total = state.leadMeta.total || 0
+    const nextOffset = state.leadOffset + state.leadLimit
+    if (nextOffset >= total) return
+    state.leadOffset = nextOffset
+    await loadLeads()
+  })
   leadForm.addEventListener('submit', async (event) => { event.preventDefault(); try { await createLead(event.currentTarget); setView('leads') } catch (error) { leadFormFeedback.textContent = error.message } })
   taskForm.addEventListener('submit', async (event) => { event.preventDefault(); try { await createTask(event.currentTarget) } catch (error) { taskFormFeedback.textContent = error.message } })
   noteForm.addEventListener('submit', async (event) => { event.preventDefault(); try { await createNote(event.currentTarget) } catch (error) { noteFormFeedback.textContent = error.message } })

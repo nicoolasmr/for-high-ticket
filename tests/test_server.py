@@ -6,6 +6,7 @@ import sys
 import tempfile
 from threading import Thread
 import unittest
+from io import BytesIO
 
 os.environ['REVENUE_OS_DISABLE_API_LOGS'] = '1'
 
@@ -14,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import server
+from api.index import app as vercel_app
 
 
 class RevenueOSTestCase(unittest.TestCase):
@@ -36,6 +38,43 @@ class RevenueOSTestCase(unittest.TestCase):
             self.assertGreaterEqual(count, 2)
         finally:
             server.DB_PATH = original_db_path
+
+    def test_resolve_default_db_path_uses_tmp_on_vercel(self):
+        original_vercel = os.environ.get('VERCEL')
+        original_override = os.environ.get('REVENUE_OS_DB_PATH')
+        try:
+            os.environ['VERCEL'] = '1'
+            os.environ.pop('REVENUE_OS_DB_PATH', None)
+            self.assertEqual(server.resolve_default_db_path(), Path('/tmp/revenue_os.db'))
+        finally:
+            if original_vercel is None:
+                os.environ.pop('VERCEL', None)
+            else:
+                os.environ['VERCEL'] = original_vercel
+            if original_override is None:
+                os.environ.pop('REVENUE_OS_DB_PATH', None)
+            else:
+                os.environ['REVENUE_OS_DB_PATH'] = original_override
+
+    def test_resolve_database_url_prefers_database_url(self):
+        original_database_url = os.environ.get('DATABASE_URL')
+        original_supabase_db_url = os.environ.get('SUPABASE_DB_URL')
+        try:
+            os.environ['DATABASE_URL'] = 'postgresql://primary'
+            os.environ['SUPABASE_DB_URL'] = 'postgresql://secondary'
+            self.assertEqual(server.resolve_database_url(), 'postgresql://primary')
+        finally:
+            if original_database_url is None:
+                os.environ.pop('DATABASE_URL', None)
+            else:
+                os.environ['DATABASE_URL'] = original_database_url
+            if original_supabase_db_url is None:
+                os.environ.pop('SUPABASE_DB_URL', None)
+            else:
+                os.environ['SUPABASE_DB_URL'] = original_supabase_db_url
+
+    def test_resolve_backend_name_prefers_sqlite_with_explicit_db_path(self):
+        self.assertEqual(server.resolve_backend_name(self.db_path), 'sqlite')
 
     def test_seeded_leads_exist(self):
         leads = server.fetch_leads(self.conn)
@@ -189,6 +228,20 @@ class RevenueOSHttpTestCase(unittest.TestCase):
         conn.close()
         return response.status, data
 
+    def request_raw(self, method, path, body=None, token=None, content_type='application/json'):
+        conn = HTTPConnection('127.0.0.1', self.port, timeout=5)
+        headers = {}
+        if content_type:
+            headers['Content-Type'] = content_type
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+        conn.request(method, path, body=body, headers=headers)
+        response = conn.getresponse()
+        data = json.loads(response.read().decode('utf-8'))
+        headers_out = dict(response.getheaders())
+        conn.close()
+        return response.status, data, headers_out
+
     def login(self, email, password):
         status, payload = self.request('POST', '/api/auth/login', {'email': email, 'password': password})
         self.assertEqual(status, 200)
@@ -199,6 +252,12 @@ class RevenueOSHttpTestCase(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(payload['error'], 'Unauthorized')
         self.assertEqual(payload['code'], 'unauthorized')
+
+    def test_health_exposes_backend(self):
+        status, payload = self.request('GET', '/api/health')
+        self.assertEqual(status, 200)
+        self.assertEqual(payload['status'], 'ok')
+        self.assertEqual(payload['backend'], 'sqlite')
 
     def test_workspaces_require_authentication(self):
         status, payload = self.request('GET', '/api/workspaces')
@@ -245,6 +304,76 @@ class RevenueOSHttpTestCase(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertEqual(payload['error'], 'Lead belongs to another workspace')
+
+    def test_invalid_json_body_returns_bad_request(self):
+        status, payload, headers = self.request_raw(
+            'POST',
+            '/api/tasks',
+            body='{"title": invalid}',
+            token=self.session['token'],
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload['error'], 'Invalid JSON body')
+        self.assertEqual(payload['code'], 'bad_request')
+        self.assertTrue(payload['requestId'])
+        self.assertEqual(headers['Cache-Control'], 'no-store')
+        self.assertEqual(headers['X-Content-Type-Options'], 'nosniff')
+        self.assertEqual(headers['X-Frame-Options'], 'DENY')
+        self.assertEqual(headers['Referrer-Policy'], 'no-referrer')
+
+
+class RevenueOSVercelAppTestCase(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp_dir.name) / 'vercel.db'
+        server.init_db(self.db_path)
+        self.original_db_path = server.DB_PATH
+        server.DB_PATH = self.db_path
+
+    def tearDown(self):
+        server.DB_PATH = self.original_db_path
+        self.temp_dir.cleanup()
+
+    def call_app(self, method, path, body=b'', auth=''):
+        status_holder = {}
+
+        def start_response(status, headers):
+            status_holder['status'] = status
+            status_holder['headers'] = dict(headers)
+
+        environ = {
+            'REQUEST_METHOD': method,
+            'PATH_INFO': path.split('?', 1)[0],
+            'QUERY_STRING': path.split('?', 1)[1] if '?' in path else '',
+            'CONTENT_LENGTH': str(len(body)),
+            'CONTENT_TYPE': 'application/json',
+            'HTTP_AUTHORIZATION': auth,
+            'wsgi.input': BytesIO(body),
+        }
+        chunks = vercel_app(environ, start_response)
+        payload = json.loads(b''.join(chunks).decode('utf-8'))
+        return status_holder['status'], payload, status_holder['headers']
+
+    def test_vercel_app_health_endpoint(self):
+        status, payload, headers = self.call_app('GET', '/api/health')
+        self.assertEqual(status, '200 OK')
+        self.assertEqual(payload['status'], 'ok')
+        self.assertEqual(payload['backend'], 'sqlite')
+        self.assertEqual(headers['X-Content-Type-Options'], 'nosniff')
+
+    def test_vercel_app_login_and_workspaces_flow(self):
+        status, payload, _ = self.call_app(
+            'POST',
+            '/api/auth/login',
+            body=json.dumps({'email': 'carla@highticketlabs.com', 'password': 'demo123'}).encode('utf-8'),
+        )
+        self.assertEqual(status, '200 OK')
+        token = payload['token']
+
+        status, payload, headers = self.call_app('GET', '/api/workspaces', auth=f'Bearer {token}')
+        self.assertEqual(status, '200 OK')
+        self.assertEqual([item['id'] for item in payload['items']], ['ws-default'])
+        self.assertTrue(headers['X-Request-Id'])
 
 
 if __name__ == '__main__':

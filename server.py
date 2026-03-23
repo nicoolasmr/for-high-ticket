@@ -2,17 +2,125 @@ from __future__ import annotations
 
 import json
 import hashlib
+import importlib
 import os
 import sqlite3
 import time
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Lock
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parent
-DB_PATH = ROOT / 'revenue_os.db'
+
+
+def resolve_database_url() -> str:
+    return (
+        os.getenv('DATABASE_URL')
+        or os.getenv('SUPABASE_DB_URL')
+        or os.getenv('SUPABASE_SESSION_POOLER_URL')
+        or os.getenv('SUPABASE_TRANSACTION_POOLER_URL')
+        or ''
+    ).strip()
+
+
+def resolve_default_db_path() -> Path:
+    configured = os.getenv('REVENUE_OS_DB_PATH')
+    if configured:
+        return Path(configured)
+    if os.getenv('VERCEL') == '1':
+        return Path('/tmp/revenue_os.db')
+    return ROOT / 'revenue_os.db'
+
+
+DB_PATH = resolve_default_db_path()
+BOOTSTRAP_LOCK = Lock()
+BOOTSTRAPPED_TARGETS: set[str] = set()
+
+
+def load_psycopg():
+    rows = importlib.import_module('psycopg.rows')
+    psycopg = importlib.import_module('psycopg')
+    return psycopg, rows
+
+
+def resolve_backend_name(db_path: Path | None = None) -> str:
+    return 'postgres' if resolve_database_url() and db_path is None else 'sqlite'
+
+
+def resolve_bootstrap_target(db_path: Path | None = None) -> str:
+    if resolve_backend_name(db_path) == 'postgres':
+        return f'postgres:{resolve_database_url()}'
+    return f'sqlite:{db_path or DB_PATH}'
+
+
+class CursorAdapter:
+    def __init__(self, raw_cursor, backend: str):
+        self.raw_cursor = raw_cursor
+        self.backend = backend
+
+    @property
+    def lastrowid(self):
+        return getattr(self.raw_cursor, 'lastrowid', None)
+
+    @property
+    def rowcount(self) -> int:
+        return getattr(self.raw_cursor, 'rowcount', -1)
+
+    def fetchone(self):
+        row = self.raw_cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row) if self.backend == 'postgres' else row
+
+    def fetchall(self):
+        rows = self.raw_cursor.fetchall()
+        return [dict(row) if self.backend == 'postgres' else row for row in rows]
+
+
+class DBConnection:
+    def __init__(self, raw_connection, backend: str):
+        self.raw_connection = raw_connection
+        self.backend = backend
+
+    def _adapt_query(self, query: str) -> str:
+        return query.replace('?', '%s') if self.backend == 'postgres' else query
+
+    def execute(self, query: str, params=()):
+        return CursorAdapter(self.raw_connection.execute(self._adapt_query(query), params), self.backend)
+
+    def executemany(self, query: str, params_seq):
+        return CursorAdapter(self.raw_connection.executemany(self._adapt_query(query), params_seq), self.backend)
+
+    def executescript(self, script: str):
+        if self.backend == 'sqlite':
+            self.raw_connection.executescript(script)
+            return
+        statements = [statement.strip() for statement in script.split(';') if statement.strip()]
+        for statement in statements:
+            self.raw_connection.execute(statement)
+
+    def commit(self) -> None:
+        self.raw_connection.commit()
+
+    def rollback(self) -> None:
+        self.raw_connection.rollback()
+
+    def close(self) -> None:
+        self.raw_connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type:
+            self.rollback()
+        else:
+            self.commit()
+        self.close()
+        return False
 
 SEED_WORKSPACES = [('ws-default', 'High Ticket Labs'), ('ws-clinics', 'Clinic Sales Ops')]
 SEED_USERS = [
@@ -116,19 +224,19 @@ SEED_LEADS = [
 ]
 
 SEED_TASKS = [
-    ('ws-default', 'lead-2', '14:00', 'Call de qualificação com Lucas Neri', 'high', 0),
-    ('ws-default', 'lead-1', '16:30', 'Follow-up Ana Ribeiro com caso de uso', 'urgent', 0),
-    ('ws-clinics', 'lead-3', '17:00', 'Confirmar call da Clínica Lumina', 'medium', 0),
-    ('ws-default', 'lead-4', '18:00', 'Primeira resposta para Juliana Costa', 'high', 0),
+    ('ws-default', 'lead-2', '14:00', 'Call de qualificação com Lucas Neri', 'high', False),
+    ('ws-default', 'lead-1', '16:30', 'Follow-up Ana Ribeiro com caso de uso', 'urgent', False),
+    ('ws-clinics', 'lead-3', '17:00', 'Confirmar call da Clínica Lumina', 'medium', False),
+    ('ws-default', 'lead-4', '18:00', 'Primeira resposta para Juliana Costa', 'high', False),
 ]
 
 SEED_ONBOARDING = [
-    ('ws-default', 'Definir nome do workspace', 1),
-    ('ws-default', 'Configurar pipeline padrão', 1),
-    ('ws-default', 'Importar leads iniciais', 0),
-    ('ws-default', 'Convidar time comercial', 0),
-    ('ws-clinics', 'Definir playbook da clínica', 1),
-    ('ws-clinics', 'Cadastrar secretárias comerciais', 0),
+    ('ws-default', 'Definir nome do workspace', True),
+    ('ws-default', 'Configurar pipeline padrão', True),
+    ('ws-default', 'Importar leads iniciais', False),
+    ('ws-default', 'Convidar time comercial', False),
+    ('ws-clinics', 'Definir playbook da clínica', True),
+    ('ws-clinics', 'Cadastrar secretárias comerciais', False),
 ]
 
 SEED_NOTES = [
@@ -145,19 +253,51 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 
-def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path or DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def coerce_json_value(value):
+    if isinstance(value, (dict, list)):
+        return value
+    return json.loads(value)
 
 
-def has_column(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+def coerce_datetime_value(value):
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    return value
+
+
+def default_error_code(status: int) -> str:
+    return {
+        400: 'bad_request',
+        401: 'unauthorized',
+        403: 'forbidden',
+        404: 'not_found',
+        409: 'conflict',
+        422: 'validation_error',
+    }.get(status, 'error')
+
+
+def get_connection(db_path: Path | None = None) -> DBConnection:
+    database_url = resolve_database_url()
+    if database_url and db_path is None:
+        psycopg, rows = load_psycopg()
+        raw_connection = psycopg.connect(database_url, row_factory=rows.dict_row)
+        return DBConnection(raw_connection, 'postgres')
+    raw_connection = sqlite3.connect(db_path or DB_PATH)
+    raw_connection.row_factory = sqlite3.Row
+    return DBConnection(raw_connection, 'sqlite')
+
+
+def has_column(conn: DBConnection, table_name: str, column_name: str) -> bool:
     columns = conn.execute(f'pragma table_info({table_name})').fetchall()
     return any(column['name'] == column_name for column in columns)
 
 
 def init_db(db_path: Path | None = None) -> None:
     with get_connection(db_path) as conn:
+        if conn.backend == 'postgres':
+            conn.executescript((ROOT / 'supabase' / 'schema.sql').read_text(encoding='utf-8'))
+            seed_db(conn)
+            return
         conn.executescript(
             '''
             create table if not exists workspaces (
@@ -215,7 +355,7 @@ def init_db(db_path: Path | None = None) -> None:
 
             create table if not exists tasks (
                 id integer primary key autoincrement,
-                workspace_id text references workspaces(id),
+                workspace_id text not null references workspaces(id),
                 lead_id text references leads(id),
                 due_time text not null,
                 title text not null,
@@ -225,7 +365,7 @@ def init_db(db_path: Path | None = None) -> None:
 
             create table if not exists onboarding_steps (
                 id integer primary key autoincrement,
-                workspace_id text references workspaces(id),
+                workspace_id text not null references workspaces(id),
                 title text not null,
                 done integer not null
             );
@@ -269,14 +409,25 @@ def init_db(db_path: Path | None = None) -> None:
         seed_db(conn)
 
 
-def log_event(conn: sqlite3.Connection, lead_id: str, event_type: str, payload: dict) -> None:
+def ensure_database_ready(db_path: Path | None = None) -> None:
+    target = resolve_bootstrap_target(db_path)
+    if target in BOOTSTRAPPED_TARGETS:
+        return
+    with BOOTSTRAP_LOCK:
+        if target in BOOTSTRAPPED_TARGETS:
+            return
+        init_db(db_path)
+        BOOTSTRAPPED_TARGETS.add(target)
+
+
+def log_event(conn: DBConnection, lead_id: str, event_type: str, payload: dict) -> None:
     conn.execute(
         'insert into events (lead_id, event_type, payload_json, created_at) values (?, ?, ?, ?)',
         (lead_id, event_type, json.dumps(payload), utc_now()),
     )
 
 
-def seed_db(conn: sqlite3.Connection) -> None:
+def seed_db(conn: DBConnection) -> None:
     has_leads = conn.execute('select count(*) as count from leads where workspace_id = ?', ('ws-default',)).fetchone()['count']
     if has_leads:
         return
@@ -333,7 +484,7 @@ def seed_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def fetch_leads(conn: sqlite3.Connection, workspace_id: str = 'ws-default', search: str = '', owner: str = 'all', temperature: str = 'all', status: str = 'all', limit: int | None = None, offset: int = 0) -> list[dict]:
+def fetch_leads(conn: DBConnection, workspace_id: str = 'ws-default', search: str = '', owner: str = 'all', temperature: str = 'all', status: str = 'all', limit: int | None = None, offset: int = 0) -> list[dict]:
     query = '''
         select leads.*, stages.name as stage_name
         from leads
@@ -353,7 +504,7 @@ def fetch_leads(conn: sqlite3.Connection, workspace_id: str = 'ws-default', sear
     return [serialize_lead(row) for row in rows]
 
 
-def count_leads(conn: sqlite3.Connection, workspace_id: str = 'ws-default', search: str = '', owner: str = 'all', temperature: str = 'all', status: str = 'all') -> int:
+def count_leads(conn: DBConnection, workspace_id: str = 'ws-default', search: str = '', owner: str = 'all', temperature: str = 'all', status: str = 'all') -> int:
     row = conn.execute(
         '''
         select count(*) as count
@@ -387,7 +538,7 @@ def serialize_lead(row: sqlite3.Row) -> dict:
     }
 
 
-def fetch_summary(conn: sqlite3.Connection, lead_id: str) -> dict | None:
+def fetch_summary(conn: DBConnection, lead_id: str) -> dict | None:
     row = conn.execute(
         'select leads.*, stages.name as stage_name from leads join stages on stages.id = leads.stage_id where leads.id = ?',
         (lead_id,),
@@ -402,14 +553,14 @@ def fetch_summary(conn: sqlite3.Connection, lead_id: str) -> dict | None:
         'status': row['status'],
         'lostReason': row['lost_reason'],
         'text': row['summary_text'],
-        'objections': json.loads(row['objections_json']),
-        'signals': json.loads(row['signals_json']),
+        'objections': coerce_json_value(row['objections_json']),
+        'signals': coerce_json_value(row['signals_json']),
         'nextBestAction': row['next_best_action'],
         'suggestedReply': row['suggested_reply'],
     }
 
 
-def fetch_dashboard(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> dict:
+def fetch_dashboard(conn: DBConnection, workspace_id: str = 'ws-default') -> dict:
     total_leads = conn.execute('select count(*) as count from leads where workspace_id = ?', (workspace_id,)).fetchone()['count']
     hot_leads = conn.execute("select count(*) as count from leads where workspace_id = ? and temperature = 'hot'", (workspace_id,)).fetchone()['count']
     risky = conn.execute(
@@ -418,8 +569,8 @@ def fetch_dashboard(conn: sqlite3.Connection, workspace_id: str = 'ws-default') 
     ).fetchone()['count']
     revenue = conn.execute('select coalesce(sum(value), 0) as total from leads where workspace_id = ?', (workspace_id,)).fetchone()['total']
     priority_tasks = conn.execute(
-        "select count(*) as count from tasks where workspace_id = ? and priority in ('urgent', 'high') and completed = 0",
-        (workspace_id,),
+        "select count(*) as count from tasks where workspace_id = ? and priority in ('urgent', 'high') and completed = ?",
+        (workspace_id, False),
     ).fetchone()['count']
     priorities = conn.execute('select id, name, company, owner, last_reply_hours from leads where workspace_id = ? order by last_reply_hours desc, value desc limit 3', (workspace_id,)).fetchall()
     return {
@@ -437,7 +588,7 @@ def fetch_dashboard(conn: sqlite3.Connection, workspace_id: str = 'ws-default') 
     }
 
 
-def fetch_pipeline(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> list[dict]:
+def fetch_pipeline(conn: DBConnection, workspace_id: str = 'ws-default') -> list[dict]:
     stages = conn.execute('select id, name from stages order by order_index asc').fetchall()
     payload = []
     for stage in stages:
@@ -446,18 +597,18 @@ def fetch_pipeline(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -
     return payload
 
 
-def fetch_tasks(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> dict:
+def fetch_tasks(conn: DBConnection, workspace_id: str = 'ws-default') -> dict:
     tasks = conn.execute(
-        'select id, workspace_id, lead_id, due_time, title, priority from tasks where workspace_id = ? and completed = 0 order by due_time asc',
-        (workspace_id,),
+        'select id, workspace_id, lead_id, due_time, title, priority from tasks where workspace_id = ? and completed = ? order by due_time asc',
+        (workspace_id, False),
     ).fetchall()
     onboarding = conn.execute(
         'select title, done from onboarding_steps where workspace_id = ? order by id asc',
         (workspace_id,),
     ).fetchall()
     completed_count = conn.execute(
-        'select count(*) as count from tasks where workspace_id = ? and completed = 1',
-        (workspace_id,),
+        'select count(*) as count from tasks where workspace_id = ? and completed = ?',
+        (workspace_id, True),
     ).fetchone()['count']
     return {
         'tasks': [dict(row) for row in tasks],
@@ -466,7 +617,7 @@ def fetch_tasks(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> d
     }
 
 
-def create_lead(conn: sqlite3.Connection, payload: dict) -> dict:
+def create_lead(conn: DBConnection, payload: dict) -> dict:
     lead_id = f'lead-{uuid4().hex[:8]}'
     workspace_id = payload.get('workspaceId', 'ws-default')
     stage_id = payload.get('stageId') or 'entry'
@@ -504,10 +655,9 @@ def create_lead(conn: sqlite3.Connection, payload: dict) -> dict:
     return serialize_lead(row)
 
 
-def update_lead_stage(conn: sqlite3.Connection, lead_id: str, stage_id: str) -> dict | None:
-    before = conn.total_changes
-    conn.execute('update leads set stage_id = ?, status = ? where id = ?', (stage_id, 'Etapa atualizada', lead_id))
-    if conn.total_changes == before:
+def update_lead_stage(conn: DBConnection, lead_id: str, stage_id: str) -> dict | None:
+    cursor = conn.execute('update leads set stage_id = ?, status = ? where id = ?', (stage_id, 'Etapa atualizada', lead_id))
+    if cursor.rowcount == 0:
         return None
     log_event(conn, lead_id, 'stage_changed', {'stageId': stage_id})
     conn.commit()
@@ -515,12 +665,11 @@ def update_lead_stage(conn: sqlite3.Connection, lead_id: str, stage_id: str) -> 
     return serialize_lead(row) if row else None
 
 
-def mark_lead_status(conn: sqlite3.Connection, lead_id: str, status: str, lost_reason: str | None = None) -> dict | None:
-    before = conn.total_changes
+def mark_lead_status(conn: DBConnection, lead_id: str, status: str, lost_reason: str | None = None) -> dict | None:
     stage_id = 'won' if status == 'Ganho' else conn.execute('select stage_id from leads where id = ?', (lead_id,)).fetchone()
     next_stage = 'won' if status == 'Ganho' else (stage_id['stage_id'] if stage_id else 'proposal')
-    conn.execute('update leads set status = ?, lost_reason = ?, stage_id = ? where id = ?', (status, lost_reason, next_stage, lead_id))
-    if conn.total_changes == before:
+    cursor = conn.execute('update leads set status = ?, lost_reason = ?, stage_id = ? where id = ?', (status, lost_reason, next_stage, lead_id))
+    if cursor.rowcount == 0:
         return None
     log_event(conn, lead_id, 'status_changed', {'status': status, 'lostReason': lost_reason})
     conn.commit()
@@ -528,18 +677,30 @@ def mark_lead_status(conn: sqlite3.Connection, lead_id: str, status: str, lost_r
     return serialize_lead(row) if row else None
 
 
-def fetch_stages(conn: sqlite3.Connection) -> list[dict]:
+def fetch_stages(conn: DBConnection) -> list[dict]:
     return [dict(row) for row in conn.execute('select id, name from stages order by order_index asc').fetchall()]
 
 
-def fetch_notes(conn: sqlite3.Connection, lead_id: str) -> list[dict]:
-    return [dict(row) for row in conn.execute('select id, author, body, created_at from notes where lead_id = ? order by id desc', (lead_id,)).fetchall()]
+def fetch_notes(conn: DBConnection, lead_id: str) -> list[dict]:
+    return [
+        {'id': row['id'], 'author': row['author'], 'body': row['body'], 'created_at': coerce_datetime_value(row['created_at'])}
+        for row in conn.execute('select id, author, body, created_at from notes where lead_id = ? order by id desc', (lead_id,)).fetchall()
+    ]
 
 
-def create_note(conn: sqlite3.Connection, lead_id: str, payload: dict) -> dict:
+def create_note(conn: DBConnection, lead_id: str, payload: dict) -> dict:
     created_at = utc_now()
     author = payload.get('author', 'Equipe')
     body = payload['body']
+    if conn.backend == 'postgres':
+        note = conn.execute(
+            'insert into notes (lead_id, author, body, created_at) values (?, ?, ?, ?) returning id, author, body, created_at',
+            (lead_id, author, body, created_at),
+        ).fetchone()
+        log_event(conn, lead_id, 'note_added', {'author': author, 'body': body})
+        conn.commit()
+        note['created_at'] = coerce_datetime_value(note['created_at'])
+        return note
     cursor = conn.execute('insert into notes (lead_id, author, body, created_at) values (?, ?, ?, ?)', (lead_id, author, body, created_at))
     log_event(conn, lead_id, 'note_added', {'author': author, 'body': body})
     note_id = cursor.lastrowid
@@ -547,16 +708,25 @@ def create_note(conn: sqlite3.Connection, lead_id: str, payload: dict) -> dict:
     return dict(conn.execute('select id, author, body, created_at from notes where id = ?', (note_id,)).fetchone())
 
 
-def create_task(conn: sqlite3.Connection, payload: dict) -> dict:
+def create_task(conn: DBConnection, payload: dict) -> dict:
     lead_id = payload.get('leadId')
     workspace_id = payload.get('workspaceId')
     if lead_id:
         lead = conn.execute('select workspace_id from leads where id = ?', (lead_id,)).fetchone()
         workspace_id = lead['workspace_id'] if lead else workspace_id
     workspace_id = workspace_id or 'ws-default'
+    if conn.backend == 'postgres':
+        task = conn.execute(
+            'insert into tasks (workspace_id, lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?, ?) returning id, workspace_id, lead_id, due_time, title, priority',
+            (workspace_id, lead_id, payload.get('dueTime', 'Hoje, 17:00'), payload['title'], payload.get('priority', 'medium'), False),
+        ).fetchone()
+        if lead_id:
+            log_event(conn, lead_id, 'task_created', {'title': payload['title'], 'priority': payload.get('priority', 'medium')})
+        conn.commit()
+        return task
     cursor = conn.execute(
-        'insert into tasks (workspace_id, lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?, 0)',
-        (workspace_id, lead_id, payload.get('dueTime', 'Hoje, 17:00'), payload['title'], payload.get('priority', 'medium')),
+        'insert into tasks (workspace_id, lead_id, due_time, title, priority, completed) values (?, ?, ?, ?, ?, ?)',
+        (workspace_id, lead_id, payload.get('dueTime', 'Hoje, 17:00'), payload['title'], payload.get('priority', 'medium'), False),
     )
     if lead_id:
         log_event(conn, lead_id, 'task_created', {'title': payload['title'], 'priority': payload.get('priority', 'medium')})
@@ -565,31 +735,31 @@ def create_task(conn: sqlite3.Connection, payload: dict) -> dict:
     return dict(conn.execute('select id, workspace_id, lead_id, due_time, title, priority from tasks where id = ?', (task_id,)).fetchone())
 
 
-def complete_task(conn: sqlite3.Connection, task_id: int) -> dict | None:
+def complete_task(conn: DBConnection, task_id: int) -> dict | None:
     task = conn.execute('select id, lead_id, title from tasks where id = ?', (task_id,)).fetchone()
     if not task:
         return None
-    conn.execute('update tasks set completed = 1 where id = ?', (task_id,))
+    conn.execute('update tasks set completed = ? where id = ?', (True, task_id))
     if task['lead_id']:
         log_event(conn, task['lead_id'], 'task_completed', {'title': task['title']})
     conn.commit()
     return {'id': task_id, 'completed': True}
 
 
-def fetch_timeline(conn: sqlite3.Connection, lead_id: str) -> list[dict]:
+def fetch_timeline(conn: DBConnection, lead_id: str) -> list[dict]:
     rows = conn.execute('select id, event_type, payload_json, created_at from events where lead_id = ? order by id desc', (lead_id,)).fetchall()
-    return [{'id': row['id'], 'eventType': row['event_type'], 'payload': json.loads(row['payload_json']), 'createdAt': row['created_at']} for row in rows]
+    return [{'id': row['id'], 'eventType': row['event_type'], 'payload': coerce_json_value(row['payload_json']), 'createdAt': coerce_datetime_value(row['created_at'])} for row in rows]
 
 
 
 
 
 
-def fetch_workspaces(conn: sqlite3.Connection) -> list[dict]:
+def fetch_workspaces(conn: DBConnection) -> list[dict]:
     return [dict(row) for row in conn.execute('select id, name from workspaces order by id asc').fetchall()]
 
 
-def fetch_user_workspaces(conn: sqlite3.Connection, user_id: str) -> list[dict]:
+def fetch_user_workspaces(conn: DBConnection, user_id: str) -> list[dict]:
     rows = conn.execute(
         '''
         select workspaces.id, workspaces.name, workspace_memberships.role
@@ -604,7 +774,7 @@ def fetch_user_workspaces(conn: sqlite3.Connection, user_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def fetch_user_invites(conn: sqlite3.Connection, user_id: str) -> list[dict]:
+def fetch_user_invites(conn: DBConnection, user_id: str) -> list[dict]:
     rows = conn.execute(
         '''
         select workspaces.id, workspaces.name, workspace_memberships.role, workspace_memberships.status
@@ -619,14 +789,14 @@ def fetch_user_invites(conn: sqlite3.Connection, user_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def create_session(conn: sqlite3.Connection, user_id: str) -> str:
+def create_session(conn: DBConnection, user_id: str) -> str:
     token = uuid4().hex
     conn.execute('insert into sessions (token, user_id, created_at) values (?, ?, ?)', (token, user_id, utc_now()))
     conn.commit()
     return token
 
 
-def authenticate(conn: sqlite3.Connection, email: str, password: str) -> dict | None:
+def authenticate(conn: DBConnection, email: str, password: str) -> dict | None:
     user = conn.execute('select id, name, email, password_hash from users where lower(email) = lower(?)', (email,)).fetchone()
     if not user or user['password_hash'] != hash_password(password):
         return None
@@ -641,7 +811,7 @@ def authenticate(conn: sqlite3.Connection, email: str, password: str) -> dict | 
     }
 
 
-def fetch_session(conn: sqlite3.Connection, token: str) -> dict | None:
+def fetch_session(conn: DBConnection, token: str) -> dict | None:
     row = conn.execute(
         '''
         select users.id, users.name, users.email
@@ -662,12 +832,12 @@ def fetch_session(conn: sqlite3.Connection, token: str) -> dict | None:
     }
 
 
-def revoke_session(conn: sqlite3.Connection, token: str) -> None:
+def revoke_session(conn: DBConnection, token: str) -> None:
     conn.execute('delete from sessions where token = ?', (token,))
     conn.commit()
 
 
-def fetch_membership(conn: sqlite3.Connection, user_id: str, workspace_id: str) -> dict | None:
+def fetch_membership(conn: DBConnection, user_id: str, workspace_id: str) -> dict | None:
     row = conn.execute(
         'select user_id, workspace_id, role, status from workspace_memberships where user_id = ? and workspace_id = ?',
         (user_id, workspace_id),
@@ -679,14 +849,14 @@ def role_allows(role: str, allowed_roles: tuple[str, ...]) -> bool:
     return role in allowed_roles
 
 
-def fetch_active_membership(conn: sqlite3.Connection, user_id: str, workspace_id: str) -> dict | None:
+def fetch_active_membership(conn: DBConnection, user_id: str, workspace_id: str) -> dict | None:
     membership = fetch_membership(conn, user_id, workspace_id)
     if not membership or membership['status'] != 'active':
         return None
     return membership
 
 
-def resolve_workspace_access(conn: sqlite3.Connection, session: dict | None, requested_workspace_id: str | None) -> tuple[str | None, dict | None]:
+def resolve_workspace_access(conn: DBConnection, session: dict | None, requested_workspace_id: str | None) -> tuple[str | None, dict | None]:
     if not session:
         return None, None
     workspaces = session.get('workspaces', [])
@@ -699,11 +869,11 @@ def resolve_workspace_access(conn: sqlite3.Connection, session: dict | None, req
     return workspace_id, membership
 
 
-def fetch_lead_workspace(conn: sqlite3.Connection, lead_id: str) -> str | None:
+def fetch_lead_workspace(conn: DBConnection, lead_id: str) -> str | None:
     row = conn.execute('select workspace_id from leads where id = ?', (lead_id,)).fetchone()
     return row['workspace_id'] if row else None
 
-def fetch_team(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> list[dict]:
+def fetch_team(conn: DBConnection, workspace_id: str = 'ws-default') -> list[dict]:
     rows = conn.execute(
         '''
         select users.id, users.name, users.email, workspace_memberships.role, workspace_memberships.status
@@ -717,7 +887,7 @@ def fetch_team(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> li
     return [dict(row) for row in rows]
 
 
-def invite_team_member(conn: sqlite3.Connection, payload: dict) -> dict:
+def invite_team_member(conn: DBConnection, payload: dict) -> dict:
     workspace_id = payload.get('workspaceId', 'ws-default')
     email = payload['email'].strip().lower()
     user = conn.execute('select id, name, email from users where lower(email) = lower(?)', (email,)).fetchone()
@@ -755,18 +925,17 @@ def invite_team_member(conn: sqlite3.Connection, payload: dict) -> dict:
     )
 
 
-def accept_team_invite(conn: sqlite3.Connection, user_id: str, workspace_id: str) -> dict | None:
-    before = conn.total_changes
-    conn.execute(
+def accept_team_invite(conn: DBConnection, user_id: str, workspace_id: str) -> dict | None:
+    cursor = conn.execute(
         "update workspace_memberships set status = 'active' where user_id = ? and workspace_id = ? and status = 'invited'",
         (user_id, workspace_id),
     )
-    if conn.total_changes == before:
+    if cursor.rowcount == 0:
         return None
     conn.commit()
     return fetch_membership(conn, user_id, workspace_id)
 
-def fetch_analytics(conn: sqlite3.Connection, workspace_id: str = 'ws-default') -> dict:
+def fetch_analytics(conn: DBConnection, workspace_id: str = 'ws-default') -> dict:
     sources = conn.execute('select source, count(*) as count, sum(value) as revenue from leads where workspace_id = ? group by source order by revenue desc', (workspace_id,)).fetchall()
     owners = conn.execute('select owner, count(*) as count, sum(value) as revenue from leads where workspace_id = ? group by owner order by revenue desc', (workspace_id,)).fetchall()
     statuses = conn.execute('select status, count(*) as count, sum(value) as revenue from leads where workspace_id = ? group by status order by count desc', (workspace_id,)).fetchall()
@@ -797,6 +966,12 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
 
     def log_message(self, format: str, *args) -> None:
         return
+
+    def end_headers(self) -> None:
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('Referrer-Policy', 'no-referrer')
+        super().end_headers()
 
     def do_GET(self) -> None:
         self.request_id = uuid4().hex
@@ -832,7 +1007,13 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
     def read_json_body(self) -> dict:
         length = int(self.headers.get('Content-Length', '0'))
         body = self.rfile.read(length) if length else b'{}'
-        return json.loads(body.decode('utf-8'))
+        try:
+            payload = json.loads(body.decode('utf-8'))
+        except json.JSONDecodeError as exc:
+            raise ValueError('Invalid JSON body') from exc
+        if not isinstance(payload, dict):
+            raise ValueError('JSON body must be an object')
+        return payload
 
     def read_bearer_token(self) -> str | None:
         header = self.headers.get('Authorization', '')
@@ -860,7 +1041,7 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
         params = parse_qs(parsed.query)
         with self.get_db_connection() as conn:
             if parsed.path == '/api/health':
-                return self.write_json({'status': 'ok'})
+                return self.write_json({'status': 'ok', 'backend': resolve_backend_name(getattr(self.server, 'db_path', None))})
             if parsed.path == '/api/auth/me':
                 token = self.read_bearer_token()
                 if not token:
@@ -938,7 +1119,10 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
         self.write_json({'error': 'Not found'}, status=404)
 
     def handle_api_write(self, parsed, method: str) -> None:
-        payload = self.read_json_body()
+        try:
+            payload = self.read_json_body()
+        except ValueError as error:
+            return self.write_json({'error': str(error)}, status=400)
         with self.get_db_connection() as conn:
             if method == 'POST' and parsed.path == '/api/auth/login':
                 if not payload.get('email') or not payload.get('password'):
@@ -1042,14 +1226,7 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
 
 
     def default_error_code(self, status: int) -> str:
-        return {
-            400: 'bad_request',
-            401: 'unauthorized',
-            403: 'forbidden',
-            404: 'not_found',
-            409: 'conflict',
-            422: 'validation_error',
-        }.get(status, 'error')
+        return default_error_code(status)
 
     def log_api_response(self, status: int, request_id: str) -> None:
         if os.getenv('REVENUE_OS_DISABLE_API_LOGS') == '1':
@@ -1076,6 +1253,7 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.send_header('X-Request-Id', payload.get('requestId', getattr(self, 'request_id', '')))
+        self.send_header('Cache-Control', 'no-store')
         self.end_headers()
         self.wfile.write(body)
         self.log_api_response(status, payload.get('requestId', getattr(self, 'request_id', '')))
@@ -1084,7 +1262,7 @@ class RevenueOSHandler(SimpleHTTPRequestHandler):
 def run(host: str | None = None, port: int | None = None) -> None:
     host = host or os.getenv('HOST', '0.0.0.0')
     port = port or int(os.getenv('PORT', '3000'))
-    init_db()
+    ensure_database_ready()
     server = ThreadingHTTPServer((host, port), RevenueOSHandler)
     print(f'Revenue OS running at http://{host}:{port}')
     server.serve_forever()

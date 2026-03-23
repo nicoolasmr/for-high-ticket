@@ -58,6 +58,9 @@ function createHarness({ initialStorage = {}, initialFetchQueue = [] } = {}) {
     '#notes-list': createElement(),
     '#team-list': createElement(),
     '#leads-table-body': createElement(),
+    '#leads-pagination-summary': createElement(),
+    '#leads-prev-page': createElement(),
+    '#leads-next-page': createElement(),
     '#pipeline-board': createElement(),
     '#task-list': createElement(),
     '#onboarding-list': createElement(),
@@ -212,7 +215,7 @@ async function testActiveWorkspaceLoginBootstrapsAppData() {
     { ok: true, body: { items: [{ id: 'entry', name: 'Entrada' }] } },
     { ok: true, body: { items: [{ id: 'user-1', name: 'Carla', email: 'carla@highticketlabs.com', role: 'admin', status: 'active' }] } },
     { ok: true, body: { kpis: [], priorities: [] } },
-    { ok: true, body: { items: [] } },
+    { ok: true, body: { items: [], meta: { total: 0, limit: 2, offset: 0 } } },
     { ok: true, body: { stages: [] } },
     { ok: true, body: { tasks: [], onboarding: [], completedCount: 0 } },
     { ok: true, body: { insights: [], sources: [], owners: [], statuses: [] } }
@@ -225,6 +228,7 @@ async function testActiveWorkspaceLoginBootstrapsAppData() {
   assert.match(harness.fetchCalls[1].url, /\/api\/workspaces/)
   assert.match(harness.fetchCalls[2].url, /\/api\/stages/)
   assert.match(harness.fetchCalls[3].url, /\/api\/team/)
+  assert.doesNotMatch(harness.fetchCalls[0].url, /workspace=/)
   assert.equal(harness.elements['#workspace-name'].textContent, 'High Ticket Labs')
 }
 
@@ -254,12 +258,109 @@ async function testEscapesUserControlledHtmlInRenderedViews() {
   assert.match(harness.elements['#notes-list'].innerHTML, /&lt;img src=x onerror=1&gt;/)
 }
 
+async function testWorkspaceSwitchResetsFiltersAndRefetchesViews() {
+  const harness = createHarness()
+  await harness.call(`
+    state.authToken = 'active-token'
+    state.workspaces = [
+      { id: 'ws-default', name: 'High Ticket Labs', role: 'admin' },
+      { id: 'ws-clinics', name: 'Clinic Sales Ops', role: 'manager' }
+    ]
+    state.workspaceId = 'ws-default'
+    state.selectedLeadId = 'lead-1'
+    state.owner = 'Carla'
+    state.temperature = 'hot'
+    state.status = 'novo'
+  `)
+  harness.setFetchQueue([
+    { ok: true, body: { kpis: [], priorities: [] } },
+    { ok: true, body: { items: [], meta: { total: 0, limit: null, offset: 0 } } },
+    { ok: true, body: { stages: [] } },
+    { ok: true, body: { tasks: [], onboarding: [], completedCount: 0 } },
+    { ok: false, status: 403, body: { error: 'Forbidden' } },
+    { ok: true, body: { items: [{ id: 'user-2', name: 'Bruna', email: 'bruna@example.com', role: 'manager', status: 'active' }] } }
+  ])
+
+  await harness.call(`
+    state.workspaceId = "ws-clinics"
+    state.selectedLeadId = null
+    state.owner = "all"
+    state.temperature = "all"
+    state.status = "all"
+  `)
+  await harness.call('refreshOperationalViews()')
+
+  assert.equal(await harness.call('state.workspaceId'), 'ws-clinics')
+  assert.equal(await harness.call('state.selectedLeadId'), null)
+  assert.equal(await harness.call('state.owner'), 'all')
+  assert.equal(await harness.call('state.temperature'), 'all')
+  assert.equal(await harness.call('state.status'), 'all')
+  assert.ok(harness.fetchCalls.some((call) => call.url.includes('/api/dashboard') && call.url.includes('workspace=ws-clinics')))
+  assert.ok(harness.fetchCalls.some((call) => call.url.includes('/api/leads') && call.url.includes('workspace=ws-clinics')))
+  assert.equal(harness.elements['#insights-list'].innerHTML.includes('Acesso restrito'), true)
+}
+
+async function testLoadLeadsClearsStaleSelectionWhenFiltersRemoveCurrentLead() {
+  const harness = createHarness()
+  await harness.call(`
+    state.authToken = 'active-token'
+    state.workspaceId = 'ws-default'
+    state.selectedLeadId = 'lead-missing'
+    aiSummary.innerHTML = 'old summary'
+    timelineList.innerHTML = 'old timeline'
+    notesList.innerHTML = 'old notes'
+  `)
+  harness.setFetchQueue([
+    { ok: true, body: { items: [], meta: { total: 0, limit: null, offset: 0 } } }
+  ])
+
+  await harness.call('loadLeads()')
+
+  assert.equal(await harness.call('state.selectedLeadId'), null)
+  assert.equal(harness.elements['#ai-summary'].innerHTML, '')
+  assert.equal(harness.elements['#timeline-list'].innerHTML, '')
+  assert.equal(harness.elements['#notes-list'].innerHTML, '')
+}
+
+async function testLoadLeadsRendersPaginationStateAndQueryParams() {
+  const harness = createHarness()
+  await harness.call(`
+    state.authToken = 'active-token'
+    state.workspaceId = 'ws-default'
+    state.leadLimit = 2
+    state.leadOffset = 2
+    state.stages = [{ id: 'entry', name: 'Entrada' }]
+  `)
+  harness.setFetchQueue([
+    {
+      ok: true,
+      body: {
+        items: [
+          { id: 'lead-3', name: 'Clínica Lumina', company: 'Clínica Lumina', source: 'Google', stageId: 'entry', owner: 'Carla', temperature: 'hot', nextAction: 'Amanhã', value: 32000, status: 'Proposta enviada' }
+        ],
+        meta: { total: 3, limit: 2, offset: 2 }
+      }
+    }
+  ])
+
+  await harness.call('loadLeads()')
+
+  assert.match(harness.fetchCalls[0].url, /limit=2/)
+  assert.match(harness.fetchCalls[0].url, /offset=2/)
+  assert.equal(harness.elements['#leads-pagination-summary'].textContent, 'Mostrando 3-3 de 3 leads')
+  assert.equal(harness.elements['#leads-prev-page'].disabled, false)
+  assert.equal(harness.elements['#leads-next-page'].disabled, true)
+}
+
 Promise.resolve()
   .then(testInvalidSavedTokenClearsAuthState)
   .then(testLogoutClearsLocalStateEvenWhenApiFails)
   .then(testInviteOnlyLoginSkipsProtectedBoot)
   .then(testActiveWorkspaceLoginBootstrapsAppData)
   .then(testEscapesUserControlledHtmlInRenderedViews)
+  .then(testWorkspaceSwitchResetsFiltersAndRefetchesViews)
+  .then(testLoadLeadsClearsStaleSelectionWhenFiltersRemoveCurrentLead)
+  .then(testLoadLeadsRendersPaginationStateAndQueryParams)
   .then(() => {
     console.log('app.js frontend checks passed')
   })

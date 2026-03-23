@@ -30,6 +30,8 @@ Esta base já cobre:
 - `supabase/rls.sql`: pacote inicial de RLS/policies para multitenancy e segurança de leitura/escrita.
 - `.env.example`: variáveis de ambiente sugeridas para deploy e conexão futura com Supabase.
 - `Dockerfile` / `.dockerignore`: containerização inicial para deploy.
+- `requirements.txt`: dependência do runtime Python para Postgres/Supabase via `psycopg`.
+- `vercel.json`: rewrites e runtime para deploy serverless no Vercel.
 - `k8s/`: manifests base de Kubernetes (namespace, config, secret example, deployment, service, ingress).
 - `docs/production-hardening.md`: roadmap operacional para rotas, multitenancy, devops e Kubernetes.
 
@@ -57,6 +59,8 @@ Esta base já cobre:
 - `POST /api/team` *(requer sessão + admin/manager)*
 - `GET /api/analytics` *(requer sessão + admin/manager)*
 
+`GET /api/health` também informa o backend ativo (`sqlite` ou `postgres`) para facilitar validação de deploy.
+
 ## Como rodar localmente
 
 ```bash
@@ -74,6 +78,23 @@ Depois abra:
 - `http://127.0.0.1:3000/` para a landing page;
 - `http://127.0.0.1:3000/app` para a demo do app.
 
+## Deploy no Vercel
+
+Esta base agora já inclui:
+
+- `vercel.json` com rewrite de `/app` e roteamento de `/api/*` para a função Python serverless;
+- `api/index.py` como entrypoint WSGI para o backend no runtime Python do Vercel;
+- `REVENUE_OS_DB_PATH=/tmp/revenue_os.db` em `.env.example`, que é o caminho recomendado para o SQLite efêmero do Vercel.
+
+### Fluxo recomendado
+
+1. Crie um projeto no Vercel apontando para este repositório.
+2. Configure `REVENUE_OS_DB_PATH=/tmp/revenue_os.db`.
+3. Para uma demo efêmera, publique como está.
+4. Para persistência real, configure `DATABASE_URL` ou uma das `SUPABASE_*_URL` e deixe o backend usar Postgres automaticamente.
+
+> **Importante:** no Vercel, o SQLite em `/tmp` continua útil para demo e smoke tests, mas a persistência final agora deve ser feita via `DATABASE_URL`/Supabase Postgres para produção.
+
 ## O que o MVP valida hoje
 
 - organização operacional do pipeline;
@@ -88,8 +109,8 @@ Depois abra:
 - Rode `supabase/seed.sql` em seguida para carregar os dados demo.
 - Rode `supabase/indexes.sql` para criar os índices recomendados.
 - Rode `supabase/rls.sql` para habilitar RLS e as policies iniciais.
-- Preencha `.env.example` com os dados reais do projeto Supabase.
-- Siga `docs/supabase-deploy.md` para escolher a connection string correta e preparar o deploy.
+- Preencha `.env.example` com os dados reais do projeto Supabase ou `DATABASE_URL`.
+- Siga `docs/supabase-deploy.md` para escolher a connection string correta e preparar o deploy, inclusive no Vercel.
 
 ## Plataforma / produção
 
