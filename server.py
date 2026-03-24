@@ -26,6 +26,13 @@ def resolve_database_url() -> str:
     ).strip()
 
 
+def env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
 def resolve_default_db_path() -> Path:
     configured = os.getenv('REVENUE_OS_DB_PATH')
     if configured:
@@ -54,6 +61,19 @@ def resolve_bootstrap_target(db_path: Path | None = None) -> str:
     if resolve_backend_name(db_path) == 'postgres':
         return f'postgres:{resolve_database_url()}'
     return f'sqlite:{db_path or DB_PATH}'
+
+
+def should_auto_migrate(backend: str) -> bool:
+    return env_flag('REVENUE_OS_AUTO_MIGRATE', True if backend == 'sqlite' else True)
+
+
+def should_seed_demo_data(backend: str) -> bool:
+    return env_flag('REVENUE_OS_SEED_DEMO_DATA', True)
+
+
+def session_ttl_seconds() -> int:
+    raw_value = os.getenv('REVENUE_OS_SESSION_TTL_HOURS', '720')
+    return max(int(raw_value), 1) * 3600
 
 
 class CursorAdapter:
@@ -265,6 +285,12 @@ def coerce_datetime_value(value):
     return value
 
 
+def parse_datetime_value(value) -> datetime:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return datetime.fromisoformat(str(value).replace('Z', '+00:00')).astimezone(timezone.utc)
+
+
 def default_error_code(status: int) -> str:
     return {
         400: 'bad_request',
@@ -295,8 +321,10 @@ def has_column(conn: DBConnection, table_name: str, column_name: str) -> bool:
 def init_db(db_path: Path | None = None) -> None:
     with get_connection(db_path) as conn:
         if conn.backend == 'postgres':
-            conn.executescript((ROOT / 'supabase' / 'schema.sql').read_text(encoding='utf-8'))
-            seed_db(conn)
+            if should_auto_migrate(conn.backend):
+                conn.executescript((ROOT / 'supabase' / 'schema.sql').read_text(encoding='utf-8'))
+            if should_seed_demo_data(conn.backend):
+                seed_db(conn)
             return
         conn.executescript(
             '''
@@ -406,7 +434,8 @@ def init_db(db_path: Path | None = None) -> None:
         if not has_column(conn, 'workspace_memberships', 'status'):
             conn.execute("alter table workspace_memberships add column status text not null default 'active'")
             conn.execute("update workspace_memberships set status = 'active' where status is null")
-        seed_db(conn)
+        if should_seed_demo_data(conn.backend):
+            seed_db(conn)
 
 
 def ensure_database_ready(db_path: Path | None = None) -> None:
@@ -814,7 +843,7 @@ def authenticate(conn: DBConnection, email: str, password: str) -> dict | None:
 def fetch_session(conn: DBConnection, token: str) -> dict | None:
     row = conn.execute(
         '''
-        select users.id, users.name, users.email
+        select users.id, users.name, users.email, sessions.created_at
         from sessions
         join users on users.id = sessions.user_id
         where sessions.token = ?
@@ -822,6 +851,11 @@ def fetch_session(conn: DBConnection, token: str) -> dict | None:
         (token,),
     ).fetchone()
     if not row:
+        return None
+    created_at = parse_datetime_value(row['created_at'])
+    age_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
+    if age_seconds > session_ttl_seconds():
+        revoke_session(conn, token)
         return None
     workspaces = fetch_user_workspaces(conn, row['id'])
     invites = fetch_user_invites(conn, row['id'])
