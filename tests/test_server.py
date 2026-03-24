@@ -389,6 +389,12 @@ class RevenueOSVercelAppTestCase(unittest.TestCase):
         self.assertEqual(payload['backend'], 'sqlite')
         self.assertEqual(headers['X-Content-Type-Options'], 'nosniff')
 
+    def test_vercel_app_api_root_health_endpoint(self):
+        status, payload, _ = self.call_app('GET', '/api')
+        self.assertEqual(status, '200 OK')
+        self.assertEqual(payload['status'], 'ok')
+        self.assertEqual(payload['backend'], 'sqlite')
+
     def test_vercel_app_login_and_workspaces_flow(self):
         status, payload, _ = self.call_app(
             'POST',
