@@ -78,7 +78,7 @@ def handle_api_request(method: str, raw_path: str, headers: dict[str, str], raw_
             token = read_bearer_token(headers)
             return server.fetch_session(conn, token) if token else None
 
-        if method == 'GET' and parsed.path == '/api/health':
+        if method == 'GET' and parsed.path in {'/api', '/api/', '/api/health'}:
             return 200, {'status': 'ok', 'backend': server.resolve_backend_name()}, request_id
 
         if method == 'GET' and parsed.path == '/api/auth/me':
